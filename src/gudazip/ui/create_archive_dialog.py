@@ -321,6 +321,12 @@ class CreateArchiveDialog(QDialog):
                 QMessageBox.warning(self, "警告", "请输入密码")
                 return
                 
+        # 在主线程中检查权限
+        all_paths = self.selected_files + [archive_path]
+        if not self.archive_manager.request_admin_if_needed(all_paths, "创建压缩包"):
+            # 用户拒绝权限申请或权限申请失败
+            return
+                
         # 禁用界面
         self.create_button.setEnabled(False)
         self.cancel_button.setText("停止")

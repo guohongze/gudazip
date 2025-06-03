@@ -9,6 +9,8 @@ import zipfile
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import time
+import ctypes
+import sys
 
 
 class ZipHandler:
@@ -17,6 +19,66 @@ class ZipHandler:
     def __init__(self):
         """初始化处理器"""
         self.supported_extensions = ['.zip']
+        
+    def needs_admin_permission(self, file_path):
+        """检查操作指定文件是否需要管理员权限"""
+        if not file_path:
+            return False
+            
+        # 规范化路径，统一使用反斜杠
+        file_path = os.path.normpath(file_path)
+            
+        # 检查是否为系统保护目录
+        protected_dirs = [
+            "C:\\Windows",
+            "C:\\Program Files", 
+            "C:\\Program Files (x86)",
+            "C:\\ProgramData",
+            "C:\\System Volume Information"
+        ]
+        
+        file_path_upper = file_path.upper()
+        for protected_dir in protected_dirs:
+            if file_path_upper.startswith(protected_dir.upper()):
+                return True
+                
+        # 检查是否为系统根目录下的重要文件
+        if file_path_upper.startswith("C:\\") and len(file_path.split("\\")) <= 2:
+            return True
+            
+        return False
+        
+    def is_admin(self):
+        """检查当前是否有管理员权限"""
+        try:
+            if os.name == 'nt':  # Windows
+                return ctypes.windll.shell32.IsUserAnAdmin()
+            else:
+                return os.geteuid() == 0
+        except:
+            return False
+            
+    def request_admin_if_needed(self, file_paths, operation="操作"):
+        """如果需要管理员权限，则申请权限"""
+        if isinstance(file_paths, str):
+            file_paths = [file_paths]
+            
+        # 检查是否有文件需要管理员权限
+        needs_admin = any(self.needs_admin_permission(path) for path in file_paths)
+        
+        if needs_admin and not self.is_admin():
+            # 动态导入以避免循环导入
+            try:
+                from main import request_admin_permission
+                reason = f"{operation}系统文件"
+                if request_admin_permission(reason):
+                    sys.exit(0)  # 重启为管理员模式
+                return False  # 用户拒绝或申请失败
+            except ImportError:
+                # 如果无法导入main模块，抛出权限错误
+                raise Exception(f"需要管理员权限才能{operation}系统文件。请以管理员身份运行程序。")
+            
+        return True  # 有权限或不需要权限
         
     def get_archive_info(self, file_path: str) -> Dict[str, Any]:
         """获取ZIP压缩包信息"""
@@ -66,6 +128,11 @@ class ZipHandler:
                        selected_files: Optional[List[str]] = None) -> bool:
         """解压ZIP文件"""
         try:
+            # 检查源文件和目标目录的权限
+            paths_to_check = [file_path, extract_to]
+            if not self.request_admin_if_needed(paths_to_check, "解压"):
+                return False
+                
             # 确保解压目录存在
             os.makedirs(extract_to, exist_ok=True)
             
@@ -135,6 +202,11 @@ class ZipHandler:
     def add_files(self, archive_path: str, files: List[str]) -> bool:
         """向ZIP文件添加文件"""
         try:
+            # 检查压缩包文件和要添加的文件的权限
+            all_paths = [archive_path] + files
+            if not self.request_admin_if_needed(all_paths, "添加文件"):
+                return False
+                
             # 创建临时文件
             temp_path = archive_path + '.tmp'
             
@@ -164,6 +236,10 @@ class ZipHandler:
     def remove_files(self, archive_path: str, files: List[str]) -> bool:
         """从ZIP文件删除文件"""
         try:
+            # 检查压缩包文件的权限
+            if not self.request_admin_if_needed([archive_path], "修改压缩包"):
+                return False
+                
             # 创建临时文件
             temp_path = archive_path + '.tmp'
             

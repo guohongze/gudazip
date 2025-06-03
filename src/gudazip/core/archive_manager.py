@@ -5,6 +5,8 @@
 """
 
 import os
+import ctypes
+import sys
 from typing import Dict, List, Optional, Any
 from .zip_handler import ZipHandler
 from .rar_handler import RarHandler
@@ -30,6 +32,66 @@ class ArchiveManager:
         for ext in rar_handler.supported_extensions:
             self.handlers[ext] = rar_handler
             
+    def needs_admin_permission(self, file_path):
+        """检查操作指定文件是否需要管理员权限"""
+        if not file_path:
+            return False
+            
+        # 规范化路径，统一使用反斜杠
+        file_path = os.path.normpath(file_path)
+            
+        # 检查是否为系统保护目录
+        protected_dirs = [
+            "C:\\Windows",
+            "C:\\Program Files", 
+            "C:\\Program Files (x86)",
+            "C:\\ProgramData",
+            "C:\\System Volume Information"
+        ]
+        
+        file_path_upper = file_path.upper()
+        for protected_dir in protected_dirs:
+            if file_path_upper.startswith(protected_dir.upper()):
+                return True
+                
+        # 检查是否为系统根目录下的重要文件
+        if file_path_upper.startswith("C:\\") and len(file_path.split("\\")) <= 2:
+            return True
+            
+        return False
+        
+    def is_admin(self):
+        """检查当前是否有管理员权限"""
+        try:
+            if os.name == 'nt':  # Windows
+                return ctypes.windll.shell32.IsUserAnAdmin()
+            else:
+                return os.geteuid() == 0
+        except:
+            return False
+            
+    def request_admin_if_needed(self, file_paths, operation="操作"):
+        """如果需要管理员权限，则申请权限"""
+        if isinstance(file_paths, str):
+            file_paths = [file_paths]
+            
+        # 检查是否有文件需要管理员权限
+        needs_admin = any(self.needs_admin_permission(path) for path in file_paths)
+        
+        if needs_admin and not self.is_admin():
+            # 动态导入以避免循环导入
+            try:
+                from main import request_admin_permission
+                reason = f"{operation}系统文件"
+                if request_admin_permission(reason):
+                    sys.exit(0)  # 重启为管理员模式
+                return False  # 用户拒绝或申请失败
+            except ImportError:
+                # 如果无法导入main模块，抛出权限错误
+                raise Exception(f"需要管理员权限才能{operation}系统文件。请以管理员身份运行程序。")
+            
+        return True  # 有权限或不需要权限
+        
     def is_archive_file(self, file_path: str) -> bool:
         """检查文件是否为支持的压缩包格式"""
         if not os.path.isfile(file_path):

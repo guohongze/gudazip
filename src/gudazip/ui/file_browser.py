@@ -17,6 +17,7 @@ import subprocess
 import sys
 import qtawesome as qta
 from datetime import datetime
+import ctypes
 
 
 class FileBrowser(QWidget):
@@ -801,6 +802,10 @@ class FileBrowser(QWidget):
             QMessageBox.warning(self, "错误", "选中的文件或文件夹都不存在")
             return
             
+        # 检查是否需要管理员权限
+        if not self.request_admin_if_needed(existing_paths, "删除"):
+            return
+            
         # 统计文件和文件夹数量
         folders = [path for path in existing_paths if os.path.isdir(path)]
         files = [path for path in existing_paths if os.path.isfile(path)]
@@ -859,6 +864,10 @@ class FileBrowser(QWidget):
             QMessageBox.warning(self, "错误", "文件或文件夹不存在")
             return
             
+        # 检查是否需要管理员权限
+        if not self.request_admin_if_needed(file_path, "重命名"):
+            return
+            
         old_name = os.path.basename(file_path)
         new_name, ok = QInputDialog.getText(
             self, "重命名", 
@@ -880,7 +889,6 @@ class FileBrowser(QWidget):
             try:
                 os.rename(file_path, new_path)
                 self.refresh_view()
-                QMessageBox.information(self, "成功", f"已重命名为 '{new_name}'")
             except Exception as e:
                 QMessageBox.critical(self, "重命名失败", f"无法重命名: {str(e)}")
 
@@ -953,6 +961,10 @@ class FileBrowser(QWidget):
             
     def copy_items(self, file_paths):
         """复制文件到剪贴板"""
+        # 检查是否需要管理员权限
+        if not self.request_admin_if_needed(file_paths, "复制"):
+            return
+            
         self.clipboard_items = file_paths.copy()
         self.clipboard_operation = "copy"
         file_names = [os.path.basename(path) for path in file_paths]
@@ -963,6 +975,10 @@ class FileBrowser(QWidget):
             
     def cut_items(self, file_paths):
         """剪切文件到剪贴板"""
+        # 检查是否需要管理员权限
+        if not self.request_admin_if_needed(file_paths, "剪切"):
+            return
+            
         self.clipboard_items = file_paths.copy()
         self.clipboard_operation = "cut"
         file_names = [os.path.basename(path) for path in file_paths]
@@ -1043,4 +1059,56 @@ class FileBrowser(QWidget):
             else:  # Linux
                 subprocess.call(["xdg-open", dir_path])
         except Exception as e:
-            QMessageBox.warning(self, "打开失败", f"无法打开目录: {str(e)}") 
+            QMessageBox.warning(self, "打开失败", f"无法打开目录: {str(e)}")
+
+    def needs_admin_permission(self, file_path):
+        """检查操作指定文件是否需要管理员权限"""
+        if not file_path:
+            return False
+            
+        # 检查是否为系统保护目录
+        protected_dirs = [
+            "C:\\Windows",
+            "C:\\Program Files", 
+            "C:\\Program Files (x86)",
+            "C:\\ProgramData",
+            "C:\\System Volume Information"
+        ]
+        
+        file_path_upper = file_path.upper()
+        for protected_dir in protected_dirs:
+            if file_path_upper.startswith(protected_dir.upper()):
+                return True
+                
+        # 检查是否为系统根目录下的重要文件
+        if file_path_upper.startswith("C:\\") and len(file_path.split("\\")) <= 2:
+            return True
+            
+        return False
+        
+    def request_admin_if_needed(self, file_paths, operation="操作"):
+        """如果需要管理员权限，则申请权限"""
+        if isinstance(file_paths, str):
+            file_paths = [file_paths]
+            
+        # 检查是否有文件需要管理员权限
+        needs_admin = any(self.needs_admin_permission(path) for path in file_paths)
+        
+        if needs_admin and not self.is_admin():
+            from main import request_admin_permission
+            reason = f"{operation}系统文件"
+            if request_admin_permission(reason):
+                sys.exit(0)  # 重启为管理员模式
+            return False  # 用户拒绝或申请失败
+            
+        return True  # 有权限或不需要权限
+        
+    def is_admin(self):
+        """检查当前是否有管理员权限"""
+        try:
+            if os.name == 'nt':  # Windows
+                return ctypes.windll.shell32.IsUserAnAdmin()
+            else:
+                return os.geteuid() == 0
+        except:
+            return False 

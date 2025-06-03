@@ -7,7 +7,9 @@ GudaZip - Python桌面压缩管理器
 
 import sys
 import os
-from PySide6.QtWidgets import QApplication
+import ctypes
+import subprocess
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QTranslator, QLocale
 from PySide6.QtGui import QIcon
 
@@ -17,11 +19,63 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from gudazip.main_window import MainWindow
 
 
+def is_admin():
+    """检查当前进程是否具有管理员权限"""
+    try:
+        if os.name == 'nt':  # Windows
+            return ctypes.windll.shell32.IsUserAnAdmin()
+        else:  # Unix/Linux/macOS
+            return os.geteuid() == 0
+    except:
+        return False
+
+
+def request_admin_permission(reason="访问系统文件"):
+    """当需要时申请管理员权限"""
+    reply = QMessageBox.question(
+        None,
+        "需要管理员权限",
+        f"当前操作需要管理员权限才能{reason}。\n\n"
+        f"是否重新以管理员身份启动程序？",
+        QMessageBox.Yes | QMessageBox.No,
+        QMessageBox.Yes
+    )
+    
+    if reply == QMessageBox.Yes:
+        try:
+            if os.name == 'nt':  # Windows
+                python_exe = sys.executable
+                script_path = os.path.abspath(__file__)
+                
+                result = ctypes.windll.shell32.ShellExecuteW(
+                    None,
+                    "runas",
+                    python_exe,
+                    f'"{script_path}" --admin',
+                    None,
+                    1
+                )
+                
+                if result > 32:
+                    return True
+        except:
+            pass
+        
+        QMessageBox.warning(
+            None,
+            "权限申请失败",
+            "无法获取管理员权限，某些操作可能无法完成。"
+        )
+    
+    return False
+
+
 def main():
     """主函数"""
-    app = QApplication(sys.argv)
+    # 检查是否通过命令行强制管理员模式
+    force_admin = '--admin' in sys.argv
     
-    # 设置应用程序信息
+    app = QApplication(sys.argv)
     app.setApplicationName("GudaZip")
     app.setApplicationVersion("0.1.0")
     app.setOrganizationName("GudaZip Team")
@@ -34,6 +88,15 @@ def main():
     
     # 创建主窗口
     window = MainWindow()
+    
+    # 根据当前权限设置窗口标题
+    if is_admin():
+        window.setWindowTitle("GudaZip - 管理员模式")
+        print("✅ 以管理员权限运行")
+    else:
+        window.setWindowTitle("GudaZip")
+        print("🏠 以普通模式运行")
+    
     window.show()
     
     return app.exec()
