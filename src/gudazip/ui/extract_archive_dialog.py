@@ -130,7 +130,7 @@ class ExtractArchiveDialog(QDialog):
         default_path = os.path.join(
             os.path.dirname(self.archive_path),
             os.path.splitext(os.path.basename(self.archive_path))[0]
-        )
+        ).replace("\\", "/")
         
         self.target_edit = QLineEdit()
         self.target_edit.setText(default_path)

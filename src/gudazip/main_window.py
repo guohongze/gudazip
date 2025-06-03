@@ -250,8 +250,8 @@ class MainWindow(QMainWindow):
             default_dir = os.path.expanduser("~")
             default_name = "新建压缩包"
         
-        # 使用Windows标准路径格式
-        default_path = os.path.join(default_dir, f"{default_name}.zip")
+        # 使用统一的路径格式（正斜杠）
+        default_path = os.path.join(default_dir, f"{default_name}.zip").replace("\\", "/")
         
         # 创建并显示创建压缩包对话框
         dialog = CreateArchiveDialog(self.archive_manager, default_path, self)
