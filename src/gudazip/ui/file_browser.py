@@ -75,6 +75,35 @@ class FileBrowser(QWidget):
         self.view_toggle_btn.clicked.connect(self.toggle_view_mode)
         toolbar_layout.addWidget(self.view_toggle_btn)
         
+        # 向上一级目录按钮
+        self.up_button = QPushButton()
+        self.up_button.setIcon(qta.icon('fa5s.arrow-up', color='#333'))
+        self.up_button.setToolTip("上一级目录")
+        self.up_button.setFixedSize(32, 32)
+        self.up_button.setStyleSheet("""
+            QPushButton {
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+                padding: 6px;
+            }
+            QPushButton:hover {
+                background-color: #e3f2fd;
+                border-color: #90caf9;
+            }
+            QPushButton:pressed {
+                background-color: #bbdefb;
+                border-color: #64b5f6;
+            }
+            QPushButton:disabled {
+                background-color: #f5f5f5;
+                color: #ccc;
+                border-color: #e0e0e0;
+            }
+        """)
+        self.up_button.clicked.connect(self.go_up_directory)
+        toolbar_layout.addWidget(self.up_button)
+        
         # 位置标签和下拉框
         location_label = QLabel("位置:")
         location_label.setStyleSheet("""
@@ -180,6 +209,9 @@ class FileBrowser(QWidget):
         
         # 现在连接信号（在模型创建之后）
         self.path_combo.currentTextChanged.connect(self.on_path_changed)
+        
+        # 为路径输入框添加回车键事件处理
+        self.path_combo.lineEdit().returnPressed.connect(self.on_path_entered)
         
         toolbar_layout.addWidget(self.path_combo)
         
@@ -372,6 +404,9 @@ class FileBrowser(QWidget):
         # 设置树视图的列显示
         self.setup_tree_columns()
         
+        # 初始化向上按钮状态
+        self.update_up_button_state()
+        
         # 连接信号
         self.tree_view.clicked.connect(self.on_item_clicked)
         self.tree_view.doubleClicked.connect(self.on_item_double_clicked)
@@ -438,6 +473,8 @@ class FileBrowser(QWidget):
             self.file_model.setRootPath("")
             self.tree_view.setRootIndex(self.file_model.index(""))
             self.list_view.setRootIndex(self.file_model.index(""))
+            # 更新向上按钮状态
+            self.update_up_button_state()
             return
             
         if os.path.exists(path):
@@ -461,7 +498,29 @@ class FileBrowser(QWidget):
                 self.path_combo.currentTextChanged.disconnect(self.on_path_changed)
                 self.path_combo.setCurrentText(path)
                 self.path_combo.currentTextChanged.connect(self.on_path_changed)
+                
+            # 更新向上按钮状态
+            self.update_up_button_state()
             
+    def update_up_button_state(self):
+        """更新向上按钮的启用状态"""
+        current_path = self.get_current_root_path()
+        
+        # 如果当前在"此电脑"或者是根目录，禁用向上按钮
+        if not current_path or current_path == "":
+            self.up_button.setEnabled(False)
+            self.up_button.setToolTip("已在最顶级目录")
+        else:
+            parent_path = os.path.dirname(current_path)
+            # 检查是否已经到达根目录
+            if parent_path == current_path:
+                # 到达系统根目录，但还可以返回到"此电脑"
+                self.up_button.setEnabled(True)
+                self.up_button.setToolTip("返回到此电脑")
+            else:
+                self.up_button.setEnabled(True)
+                self.up_button.setToolTip(f"上一级目录: {os.path.basename(parent_path) if parent_path else '此电脑'}")
+        
     def on_path_changed(self, path_text):
         """路径改变事件"""
         # 从下拉框文本中提取路径
@@ -478,6 +537,46 @@ class FileBrowser(QWidget):
         elif os.path.exists(path):
             self.set_root_path(path)
             
+    def on_path_entered(self):
+        """用户在路径输入框中按回车键"""
+        path_text = self.path_combo.lineEdit().text().strip()
+        if not path_text:
+            return
+            
+        # 规范化路径
+        path_text = os.path.normpath(path_text)
+        
+        if path_text == "此电脑" or path_text.lower() == "thispc":
+            self.set_root_path("ThisPC")
+        elif os.path.exists(path_text) and os.path.isdir(path_text):
+            self.set_root_path(path_text)
+            QMessageBox.information(self, "导航成功", f"已跳转到: {path_text}")
+        else:
+            QMessageBox.warning(self, "路径错误", f"路径不存在或不是文件夹: {path_text}")
+            # 恢复为当前路径
+            current_path = self.get_current_root_path()
+            if current_path:
+                self.path_combo.lineEdit().setText(current_path)
+            
+    def go_up_directory(self):
+        """返回上一级目录"""
+        current_path = self.get_current_root_path()
+        if not current_path or current_path == "":
+            # 当前在"此电脑"，无法再向上
+            QMessageBox.information(self, "提示", "已经在最顶级目录")
+            return
+            
+        parent_path = os.path.dirname(current_path)
+        
+        # 如果已经到根目录，切换到"此电脑"
+        if parent_path == current_path or not parent_path:
+            self.set_root_path("ThisPC")
+        else:
+            self.set_root_path(parent_path)
+            
+        # 更新向上按钮状态
+        self.update_up_button_state()
+        
     def on_search_text_changed(self, text):
         """搜索文本改变事件"""
         if not text.strip():
@@ -749,13 +848,7 @@ class FileBrowser(QWidget):
             # 刷新视图
             self.refresh_view()
             
-            # 显示结果
-            if success_count > 0:
-                if len(existing_paths) == 1:
-                    QMessageBox.information(self, "删除成功", f"已删除 '{os.path.basename(existing_paths[0])}'")
-                else:
-                    QMessageBox.information(self, "删除成功", f"成功删除 {success_count} 个项目")
-            
+            # 显示结果（只显示失败信息，不显示成功信息）
             if failed_items:
                 error_message = "以下项目删除失败：\n" + "\n".join(failed_items)
                 QMessageBox.critical(self, "删除失败", error_message)
