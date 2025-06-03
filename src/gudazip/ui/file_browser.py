@@ -156,13 +156,13 @@ class FileBrowser(QWidget):
         self.view_toggle_btn = QPushButton()
         self.view_toggle_btn.setIcon(qta.icon('fa5s.list', color='#333'))
         self.view_toggle_btn.setToolTip("切换到图标视图")
-        self.view_toggle_btn.setFixedSize(32, 32)
+        self.view_toggle_btn.setFixedSize(40, 40)  # 从32x32增加到40x40 (25%增长)
         self.view_toggle_btn.setStyleSheet("""
             QPushButton {
                 border: 1px solid #d0d0d0;
                 border-radius: 4px;
                 background-color: #f8f9fa;
-                padding: 6px;
+                padding: 8px;
             }
             QPushButton:hover {
                 background-color: #e3f2fd;
@@ -180,13 +180,13 @@ class FileBrowser(QWidget):
         self.up_button = QPushButton()
         self.up_button.setIcon(qta.icon('fa5s.arrow-up', color='#333'))
         self.up_button.setToolTip("上一级目录")
-        self.up_button.setFixedSize(32, 32)
+        self.up_button.setFixedSize(40, 40)  # 从32x32增加到40x40 (25%增长)
         self.up_button.setStyleSheet("""
             QPushButton {
                 border: 1px solid #d0d0d0;
                 border-radius: 4px;
                 background-color: #f8f9fa;
-                padding: 6px;
+                padding: 8px;
             }
             QPushButton:hover {
                 background-color: #e3f2fd;
@@ -215,6 +215,7 @@ class FileBrowser(QWidget):
                 margin-left: 8px;
                 border: none;
                 background: transparent;
+                font-size: 15px;
             }
         """)
         toolbar_layout.addWidget(location_label)
@@ -223,14 +224,14 @@ class FileBrowser(QWidget):
         self.path_combo = QComboBox()
         self.path_combo.setEditable(True)
         self.path_combo.setMinimumWidth(350)
-        self.path_combo.setMaximumHeight(32)
+        self.path_combo.setMaximumHeight(40)  # 从32增加到40 (25%增长)
         self.path_combo.setStyleSheet("""
             QComboBox {
                 border: 1px solid #d0d0d0;
-                padding: 5px 10px;
+                padding: 6px 12px;
                 background-color: white;
-                font-size: 12px;
-                min-height: 20px;
+                font-size: 15px;
+                min-height: 25px;
                 border-radius: 4px;
             }
             QComboBox:hover {
@@ -243,7 +244,7 @@ class FileBrowser(QWidget):
             QComboBox::drop-down {
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
-                width: 20px;
+                width: 25px;
                 border-left-width: 1px;
                 border-left-color: #d0d0d0;
                 border-left-style: solid;
@@ -254,9 +255,9 @@ class FileBrowser(QWidget):
             QComboBox::down-arrow {
                 width: 0; 
                 height: 0; 
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent; 
-                border-top: 5px solid #666;
+                border-left: 6px solid transparent;
+                border-right: 6px solid transparent; 
+                border-top: 6px solid #666;
             }
             QComboBox::down-arrow:hover {
                 border-top-color: #333;
@@ -267,12 +268,12 @@ class FileBrowser(QWidget):
                 background-color: white;
                 selection-background-color: #e3f2fd;
                 outline: none;
-                font-size: 18px;
-                padding: 4px;
+                font-size: 23px;
+                padding: 5px;
             }
             QComboBox QAbstractItemView::item {
-                padding: 8px 12px;
-                min-height: 28px;
+                padding: 10px 15px;
+                min-height: 35px;
             }
         """)
         
@@ -285,19 +286,16 @@ class FileBrowser(QWidget):
         music_path = QStandardPaths.writableLocation(QStandardPaths.MusicLocation)
         home_path = QStandardPaths.writableLocation(QStandardPaths.HomeLocation)
         
-        # 添加Windows11风格图标到下拉框
+        # 添加Windows11风格图标到下拉框 - 使用更大的emoji图标
         windows_paths = [
-            ("🖥️ 桌面", desktop_path),
-            ("💻 此电脑", ""),  # 特殊处理
-            ("📂 文档", documents_path),
-            ("🖼️ 图片", pictures_path),
-            ("⬇️ 下载", downloads_path),
-            ("🎬 视频", videos_path),
-            ("🎵 音乐", music_path),
-            ("👤 用户", home_path),
-            ("💾 本地磁盘 (C:)", "C:\\"),
-            ("💾 本地磁盘 (D:)", "D:\\"),
-            ("💾 本地磁盘 (E:)", "E:\\"),
+            ("🖥️  桌面", desktop_path),
+            ("💻  此电脑", ""),  # 特殊处理
+            ("📂  文档", documents_path),
+            ("🖼️  图片", pictures_path),
+            ("⬇️  下载", downloads_path),
+            ("🎬  视频", videos_path),
+            ("🎵  音乐", music_path),
+            ("👤  用户", home_path),
         ]
         
         for name, path in windows_paths:
@@ -326,6 +324,7 @@ class FileBrowser(QWidget):
                 margin-right: 5px;
                 border: none;
                 background: transparent;
+                font-size: 15px;
             }
         """)
         toolbar_layout.addWidget(search_label)
@@ -335,14 +334,14 @@ class FileBrowser(QWidget):
         self.search_box.textChanged.connect(self.on_search_text_changed)
         self.search_box.setMinimumWidth(280)
         self.search_box.setMaximumWidth(350)
-        self.search_box.setMaximumHeight(32)
+        self.search_box.setMaximumHeight(40)  # 从32增加到40，与下拉框一致
         self.search_box.setStyleSheet("""
             QLineEdit {
                 border: 1px solid #d0d0d0;
-                padding: 5px 12px;
+                padding: 6px 12px;
                 background-color: white;
-                font-size: 12px;
-                min-height: 20px;
+                font-size: 15px;
+                min-height: 25px;
                 border-radius: 4px;
             }
             QLineEdit:hover {
@@ -355,6 +354,7 @@ class FileBrowser(QWidget):
             QLineEdit::placeholder {
                 color: #999;
                 font-style: italic;
+                font-size: 14px;
             }
         """)
         toolbar_layout.addWidget(self.search_box)
