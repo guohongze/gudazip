@@ -8,13 +8,15 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QSplitter, QTreeView, QListView, QToolBar, QMenuBar,
     QStatusBar, QLabel, QTabWidget, QPushButton, QFileDialog,
-    QMessageBox, QFileSystemModel
+    QMessageBox, QFileSystemModel, QDialog
 )
 from PySide6.QtCore import Qt, QDir, QUrl
 from PySide6.QtGui import QAction, QIcon, QStandardItemModel, QStandardItem
+import os
 
 from .ui.file_browser import FileBrowser
 from .ui.archive_viewer import ArchiveViewer
+from .ui.create_archive_dialog import CreateArchiveDialog
 from .core.archive_manager import ArchiveManager
 
 
@@ -185,13 +187,46 @@ class MainWindow(QMainWindow):
             
     def new_archive(self):
         """新建压缩包"""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "新建压缩包", "", 
-            "ZIP文件 (*.zip);;RAR文件 (*.rar);;7z文件 (*.7z);;所有文件 (*.*)"
-        )
-        if file_path:
-            # TODO: 实现新建压缩包功能
-            QMessageBox.information(self, "提示", f"将创建压缩包：{file_path}")
+        # 获取当前选择的文件路径作为默认保存位置
+        current_path = self.file_browser.get_current_path()
+        if current_path and os.path.isfile(current_path):
+            # 如果选择的是文件，使用其目录作为默认位置
+            default_path = os.path.join(os.path.dirname(current_path), "新建压缩包.zip")
+        elif current_path and os.path.isdir(current_path):
+            # 如果选择的是目录，在该目录下创建压缩包
+            default_path = os.path.join(current_path, "新建压缩包.zip")
+        else:
+            # 使用用户主目录作为默认位置
+            default_path = os.path.join(os.path.expanduser("~"), "新建压缩包.zip")
+        
+        # 创建并显示创建压缩包对话框
+        dialog = CreateArchiveDialog(self.archive_manager, default_path, self)
+        
+        # 如果当前有选择的文件或目录，预先添加到对话框中
+        if current_path and os.path.exists(current_path):
+            dialog.selected_files.append(current_path)
+            if os.path.isfile(current_path):
+                item_text = f"📄 {current_path}"
+            else:
+                item_text = f"📁 {current_path}"
+            
+            from PySide6.QtWidgets import QListWidgetItem
+            from PySide6.QtCore import Qt
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.UserRole, current_path)
+            dialog.files_list.addItem(item)
+            dialog.update_ui_state()
+        
+        # 显示对话框
+        if dialog.exec() == QDialog.Accepted:
+            # 对话框中已经处理了创建过程
+            # 这里可以添加后续处理，比如刷新界面等
+            self.path_label.setText("压缩包创建完成")
+            
+            # 可选：打开刚创建的压缩包
+            archive_path = dialog.path_edit.text()
+            if os.path.exists(archive_path):
+                self.open_archive_file(archive_path)
             
     def open_archive(self):
         """打开压缩包"""
