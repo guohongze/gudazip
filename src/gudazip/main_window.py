@@ -413,9 +413,19 @@ class MainWindow(QMainWindow):
     def open_archive_in_browser(self, file_path):
         """在文件浏览器内查看压缩包"""
         try:
+            # 验证文件路径
+            if not file_path or not os.path.exists(file_path):
+                QMessageBox.warning(self, "错误", f"文件不存在：{file_path}")
+                return
+                
             # 检查是否为支持的压缩包
             if not self.archive_manager.is_archive_file(file_path):
                 QMessageBox.warning(self, "错误", "不支持的压缩文件格式")
+                return
+            
+            # 验证压缩包完整性
+            if not self.archive_manager.validate_archive(file_path):
+                QMessageBox.critical(self, "错误", "压缩包文件已损坏或无法读取")
                 return
             
             # 获取压缩包信息
@@ -430,7 +440,20 @@ class MainWindow(QMainWindow):
             
             # 更新状态栏和窗口标题
             file_count = len(archive_files)
-            self.path_label.setText(f"压缩包：{os.path.basename(file_path)} ({file_count} 个文件)")
+            total_size = archive_info.get('total_size', 0)
+            compressed_size = archive_info.get('compressed_size', 0)
+            
+            # 格式化大小
+            def format_size(size_bytes):
+                for unit in ['B', 'KB', 'MB', 'GB']:
+                    if size_bytes < 1024.0:
+                        return f"{size_bytes:.1f} {unit}"
+                    size_bytes /= 1024.0
+                return f"{size_bytes:.1f} TB"
+            
+            status_text = f"压缩包：{os.path.basename(file_path)} ({file_count} 个文件, " \
+                         f"原始大小: {format_size(total_size)}, 压缩后: {format_size(compressed_size)})"
+            self.path_label.setText(status_text)
             
             # 启用返回按钮
             self.action_back_to_filesystem.setEnabled(True)
@@ -442,24 +465,40 @@ class MainWindow(QMainWindow):
                 base_title = "GudaZip - 管理员模式"
             self.setWindowTitle(f"{base_title} - {os.path.basename(file_path)}")
             
+        except PermissionError as e:
+            QMessageBox.critical(self, "权限错误", f"没有权限访问压缩包：{str(e)}")
+        except FileNotFoundError as e:
+            QMessageBox.critical(self, "文件错误", f"文件未找到：{str(e)}")
+        except ValueError as e:
+            QMessageBox.critical(self, "文件格式错误", str(e))
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开压缩包失败：{str(e)}")
+            # 记录详细错误信息到控制台
+            import traceback
+            print(f"详细错误信息：{traceback.format_exc()}")
     
     def exit_archive_mode(self):
         """退出压缩包查看模式"""
-        # 使用文件浏览器的退出方法
-        self.file_browser.exit_archive_mode()
-        
-        # 禁用返回文件系统按钮
-        self.action_back_to_filesystem.setEnabled(False)
-        
-        # 恢复窗口标题
-        base_title = "GudaZip"
-        import main
-        if main.is_admin():
-            base_title = "GudaZip - 管理员模式"
-        self.setWindowTitle(base_title)
-        
-        # 更新状态栏
-        self.path_label.setText("就绪")
+        try:
+            # 使用文件浏览器的退出方法
+            self.file_browser.exit_archive_mode()
+            
+            # 禁用返回文件系统按钮
+            self.action_back_to_filesystem.setEnabled(False)
+            
+            # 恢复窗口标题
+            base_title = "GudaZip"
+            import main
+            if main.is_admin():
+                base_title = "GudaZip - 管理员模式"
+            self.setWindowTitle(base_title)
+            
+            # 更新状态栏
+            self.path_label.setText("就绪")
+            
+        except Exception as e:
+            QMessageBox.warning(self, "警告", f"退出压缩包查看模式时发生错误：{str(e)}")
+            # 强制重置状态
+            self.action_back_to_filesystem.setEnabled(False)
+            self.path_label.setText("就绪")
     

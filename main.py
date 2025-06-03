@@ -72,58 +72,109 @@ def request_admin_permission(reason="访问系统文件"):
 
 def main():
     """主函数"""
-    # 检查是否通过命令行强制管理员模式
-    force_admin = '--admin' in sys.argv
-    
-    app = QApplication(sys.argv)
-    app.setApplicationName("GudaZip")
-    app.setApplicationVersion("0.1.0")
-    app.setOrganizationName("GudaZip Team")
-    
-    # 设置中文语言
-    translator = QTranslator()
-    locale = QLocale.system()
-    if translator.load(locale, "gudazip", "_", "resources/translations"):
-        app.installTranslator(translator)
-    
-    # 设置应用程序图标
     try:
-        icon_path = os.path.join(os.path.dirname(__file__), "resources", "icons", "app_icon.png")
-        if os.path.exists(icon_path):
-            app.setWindowIcon(QIcon(icon_path))
+        # 启动时进行健康检查
+        from gudazip.core.health_checker import HealthChecker
+        
+        print("正在进行程序健康检查...")
+        is_healthy, issues = HealthChecker.check_all()
+        
+        if not is_healthy:
+            print("⚠️ 发现以下问题：")
+            for issue in issues:
+                print(f"  - {issue}")
+            print()
+            
+            # 对于严重问题，询问用户是否继续
+            critical_issues = [issue for issue in issues if "缺少必需模块" in issue or "Python版本过低" in issue]
+            if critical_issues:
+                print("检测到严重问题，程序可能无法正常运行。")
+                # 在GUI环境下，这里会显示对话框询问用户
+        else:
+            print("✅ 程序健康检查通过")
+        
+        # 检查是否通过命令行强制管理员模式
+        force_admin = '--admin' in sys.argv
+        
+        app = QApplication(sys.argv)
+        app.setApplicationName("GudaZip")
+        app.setApplicationVersion("0.1.0")
+        app.setOrganizationName("GudaZip Team")
+        
+        # 设置中文语言
+        translator = QTranslator()
+        locale = QLocale.system()
+        if translator.load(locale, "gudazip", "_", "resources/translations"):
+            app.installTranslator(translator)
+        
+        # 设置应用程序图标
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "resources", "icons", "app_icon.png")
+            if os.path.exists(icon_path):
+                app.setWindowIcon(QIcon(icon_path))
+        except Exception as e:
+            print(f"设置应用图标失败: {e}")
+        
+        # 如果健康检查发现严重问题，显示警告对话框
+        if not is_healthy:
+            critical_issues = [issue for issue in issues if "缺少必需模块" in issue or "Python版本过低" in issue]
+            if critical_issues:
+                reply = QMessageBox.warning(
+                    None, "程序环境问题", 
+                    f"检测到以下问题，程序可能无法正常运行：\n\n" + 
+                    "\n".join(f"• {issue}" for issue in critical_issues) + 
+                    "\n\n是否继续运行？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    return 0
+        
+        # 创建主窗口
+        try:
+            window = MainWindow()
+        except Exception as e:
+            QMessageBox.critical(None, "启动失败", f"无法创建主窗口：{str(e)}")
+            return 1
+        
+        # 根据当前权限设置窗口标题
+        if is_admin():
+            window.setWindowTitle("GudaZip - 管理员模式")
+            print("✅ 以管理员权限运行")
+        else:
+            window.setWindowTitle("GudaZip")
+            print("以普通模式运行")
+        
+        # 检查命令行参数中是否有文件路径
+        archive_file = None
+        for arg in sys.argv[1:]:
+            if not arg.startswith('--') and os.path.isfile(arg):
+                # 检查是否为支持的压缩文件
+                archive_extensions = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz']
+                _, ext = os.path.splitext(arg.lower())
+                if ext in archive_extensions:
+                    archive_file = os.path.abspath(arg)
+                    break
+        
+        window.show()
+        
+        # 如果有压缩文件参数，在窗口显示后打开它
+        if archive_file:
+            try:
+                window.load_archive_from_commandline(archive_file)
+            except Exception as e:
+                QMessageBox.warning(window, "打开失败", f"无法打开压缩包：{str(e)}")
+        
+        return app.exec()
+        
     except Exception as e:
-        print(f"设置应用图标失败: {e}")
-    
-    # 创建主窗口
-    window = MainWindow()
-    
-    # 根据当前权限设置窗口标题
-    if is_admin():
-        window.setWindowTitle("GudaZip - 管理员模式")
-        print("✅ 以管理员权限运行")
-    else:
-        window.setWindowTitle("GudaZip")
-        print("以普通模式运行")
-    
-    # 检查命令行参数中是否有文件路径
-    archive_file = None
-    for arg in sys.argv[1:]:
-        if not arg.startswith('--') and os.path.isfile(arg):
-            # 检查是否为支持的压缩文件
-            archive_extensions = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz']
-            _, ext = os.path.splitext(arg.lower())
-            if ext in archive_extensions:
-                archive_file = os.path.abspath(arg)
-                break
-    
-    window.show()
-    
-    # 如果有压缩文件参数，在窗口显示后打开它
-    if archive_file:
-        # 使用简单的系统打开方式
-        window.load_archive_from_commandline(archive_file)
-    
-    return app.exec()
+        # 全局异常处理
+        try:
+            QMessageBox.critical(None, "程序错误", f"程序运行时发生错误：{str(e)}\n\n程序将退出。")
+        except:
+            # 如果连消息框都无法显示，则使用print
+            print(f"严重错误：{str(e)}")
+        return 1
 
 
 if __name__ == "__main__":

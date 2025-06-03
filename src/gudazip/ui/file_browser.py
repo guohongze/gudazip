@@ -1339,60 +1339,15 @@ class FileBrowser(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "打开失败", f"无法打开目录: {str(e)}")
 
-    def needs_admin_permission(self, file_path):
-        """检查操作指定文件是否需要管理员权限"""
-        if not file_path:
-            return False
-            
-        # 规范化路径，统一使用反斜杠
-        file_path = os.path.normpath(file_path)
-            
-        # 检查是否为系统保护目录
-        protected_dirs = [
-            "C:\\Windows",
-            "C:\\Program Files", 
-            "C:\\Program Files (x86)",
-            "C:\\ProgramData",
-            "C:\\System Volume Information"
-        ]
-        
-        file_path_upper = file_path.upper()
-        for protected_dir in protected_dirs:
-            if file_path_upper.startswith(protected_dir.upper()):
-                return True
-                
-        # 检查是否为系统根目录下的重要文件
-        if file_path_upper.startswith("C:\\") and len(file_path.split("\\")) <= 2:
-            return True
-            
-        return False
-        
     def request_admin_if_needed(self, file_paths, operation="操作"):
         """如果需要管理员权限，则申请权限"""
-        if isinstance(file_paths, str):
-            file_paths = [file_paths]
-            
-        # 检查是否有文件需要管理员权限
-        needs_admin = any(self.needs_admin_permission(path) for path in file_paths)
-        
-        if needs_admin and not self.is_admin():
-            from main import request_admin_permission
-            reason = f"{operation}系统文件"
-            if request_admin_permission(reason):
-                sys.exit(0)  # 重启为管理员模式
-            return False  # 用户拒绝或申请失败
-            
-        return True  # 有权限或不需要权限
+        from ..core.permission_manager import PermissionManager
+        return PermissionManager.request_admin_if_needed(file_paths, operation)
         
     def is_admin(self):
         """检查当前是否有管理员权限"""
-        try:
-            if os.name == 'nt':  # Windows
-                return ctypes.windll.shell32.IsUserAnAdmin()
-            else:
-                return os.geteuid() == 0
-        except:
-            return False 
+        from ..core.permission_manager import PermissionManager
+        return PermissionManager.is_admin()
 
     def is_archive_file(self, file_path):
         """检查文件是否为支持的压缩包格式"""
