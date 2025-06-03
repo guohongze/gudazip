@@ -1066,6 +1066,9 @@ class FileBrowser(QWidget):
         if not file_path:
             return False
             
+        # 规范化路径，统一使用反斜杠
+        file_path = os.path.normpath(file_path)
+            
         # 检查是否为系统保护目录
         protected_dirs = [
             "C:\\Windows",
