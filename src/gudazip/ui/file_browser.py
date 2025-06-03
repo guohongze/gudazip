@@ -6,12 +6,17 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeView, QHeaderView, 
-    QFileSystemModel, QComboBox, QLabel, QPushButton, QLineEdit, QListView
+    QFileSystemModel, QComboBox, QLabel, QPushButton, QLineEdit, QListView,
+    QMenu, QMessageBox, QInputDialog, QApplication, QDialog, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, QDir, Signal, QModelIndex, QStandardPaths
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QAction
 import os
+import shutil
+import subprocess
+import sys
 import qtawesome as qta
+from datetime import datetime
 
 
 class FileBrowser(QWidget):
@@ -25,6 +30,9 @@ class FileBrowser(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_view_mode = "详细信息"  # 当前视图模式
+        # 剪贴板操作相关
+        self.clipboard_items = []  # 剪贴板中的文件路径
+        self.clipboard_operation = ""  # "copy" 或 "cut"
         self.init_ui()
         
     def init_ui(self):
@@ -243,6 +251,10 @@ class FileBrowser(QWidget):
         # 设置多选模式
         self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
         
+        # 设置上下文菜单
+        self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree_view.customContextMenuRequested.connect(self.show_context_menu)
+        
         # 创建列表视图（图标视图）
         self.list_view = QListView()
         self.list_view.setModel(self.file_model)
@@ -251,6 +263,10 @@ class FileBrowser(QWidget):
         self.list_view.setSelectionMode(QListView.ExtendedSelection)
         self.list_view.setUniformItemSizes(True)
         self.list_view.setGridSize(self.list_view.gridSize() * 1.2)  # 稍微增大网格
+        
+        # 设置列表视图的上下文菜单
+        self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list_view.customContextMenuRequested.connect(self.show_list_context_menu)
         
         # 为树视图添加样式
         self.tree_view.setStyleSheet("""
@@ -525,3 +541,413 @@ class FileBrowser(QWidget):
         if index.isValid():
             self.current_view.setCurrentIndex(index)
             self.current_view.scrollTo(index) 
+
+    def show_context_menu(self, position):
+        """显示树视图上下文菜单"""
+        index = self.tree_view.indexAt(position)
+        self._show_context_menu(index, self.tree_view.mapToGlobal(position))
+        
+    def show_list_context_menu(self, position):
+        """显示列表视图上下文菜单"""
+        index = self.list_view.indexAt(position)
+        self._show_context_menu(index, self.list_view.mapToGlobal(position))
+        
+    def _show_context_menu(self, index, global_position):
+        """显示上下文菜单的通用方法"""
+        menu = QMenu(self)
+        
+        # 获取当前所有选中的文件路径
+        selected_paths = self.get_selected_paths()
+        
+        if index.isValid() and selected_paths:
+            file_path = self.file_model.filePath(index)
+            is_dir = self.file_model.isDir(index)
+            
+            # 如果右键的文件不在选中列表中，则只操作右键的文件
+            if file_path not in selected_paths:
+                selected_paths = [file_path]
+            
+            # 判断选中项目的类型
+            is_multiple = len(selected_paths) > 1
+            has_folders = any(os.path.isdir(path) for path in selected_paths)
+            has_files = any(os.path.isfile(path) for path in selected_paths)
+            
+            # 打开菜单项（只在单选时显示）
+            if not is_multiple:
+                if is_dir:
+                    open_action = QAction(qta.icon('fa5s.folder-open', color='#f57c00'), "打开", self)
+                    open_action.triggered.connect(lambda: self.open_folder(file_path))
+                else:
+                    open_action = QAction(qta.icon('fa5s.file', color='#2196f3'), "打开", self)
+                    open_action.triggered.connect(lambda: self.open_file(file_path))
+                menu.addAction(open_action)
+                menu.addSeparator()
+            
+            # 剪切、复制菜单项（支持多选）
+            cut_action = QAction(qta.icon('fa5s.cut', color='#ff9800'), "剪切", self)
+            copy_action = QAction(qta.icon('fa5s.copy', color='#2196f3'), "复制", self)
+                
+            cut_action.triggered.connect(lambda: self.cut_items(selected_paths))
+            copy_action.triggered.connect(lambda: self.copy_items(selected_paths))
+            menu.addAction(cut_action)
+            menu.addAction(copy_action)
+            
+            # 粘贴菜单项（只在单选文件夹时显示）
+            if not is_multiple and is_dir and self.clipboard_items:
+                paste_action = QAction(qta.icon('fa5s.paste', color='#4caf50'), "粘贴", self)
+                paste_action.triggered.connect(lambda: self.paste_items(file_path))
+                menu.addAction(paste_action)
+            
+            menu.addSeparator()
+            
+            # 重命名菜单项（只在单选时显示）
+            if not is_multiple:
+                rename_action = QAction(qta.icon('fa5s.edit', color='#ff9800'), "重命名", self)
+                rename_action.triggered.connect(lambda: self.rename_file(file_path))
+                menu.addAction(rename_action)
+            
+            # 删除菜单项（支持多选）
+            delete_action = QAction(qta.icon('fa5s.trash', color='#f44336'), "删除", self)
+            delete_action.triggered.connect(lambda: self.delete_files(selected_paths))
+            menu.addAction(delete_action)
+            
+            # 只在单选文件夹时显示新建选项
+            if not is_multiple and is_dir:
+                menu.addSeparator()
+                new_folder_action = QAction(qta.icon('fa5s.folder', color='#4caf50'), "新建文件夹", self)
+                new_folder_action.triggered.connect(lambda: self.create_folder(file_path))
+                menu.addAction(new_folder_action)
+                
+                new_file_action = QAction(qta.icon('fa5s.file-alt', color='#4caf50'), "新建文件", self)
+                new_file_action.triggered.connect(lambda: self.create_file(file_path))
+                menu.addAction(new_file_action)
+            
+        else:
+            # 在空白处右键，在当前目录操作
+            current_dir = self.get_current_root_path()
+            if current_dir and os.path.exists(current_dir):
+                # 粘贴选项
+                if self.clipboard_items:
+                    paste_action = QAction(qta.icon('fa5s.paste', color='#4caf50'), "粘贴", self)
+                    paste_action.triggered.connect(lambda: self.paste_items(current_dir))
+                    menu.addAction(paste_action)
+                    menu.addSeparator()
+                
+                # 新建选项
+                new_folder_action = QAction(qta.icon('fa5s.folder', color='#4caf50'), "新建文件夹", self)
+                new_folder_action.triggered.connect(lambda: self.create_folder(current_dir))
+                menu.addAction(new_folder_action)
+                
+                new_file_action = QAction(qta.icon('fa5s.file-alt', color='#4caf50'), "新建文件", self)
+                new_file_action.triggered.connect(lambda: self.create_file(current_dir))
+                menu.addAction(new_file_action)
+                
+                menu.addSeparator()
+                
+                # 在资源管理器中打开当前目录
+                open_explorer_action = QAction(qta.icon('fa5s.external-link-alt', color='#2196f3'), "在资源管理器中打开", self)
+                open_explorer_action.triggered.connect(lambda: self.open_in_explorer(current_dir))
+                menu.addAction(open_explorer_action)
+                
+                # 刷新选项
+                refresh_action = QAction(qta.icon('fa5s.sync-alt', color='#2196f3'), "刷新", self)
+                refresh_action.triggered.connect(self.refresh_view)
+                menu.addAction(refresh_action)
+        
+        if menu.actions():  # 只有在有菜单项时才显示
+            menu.exec(global_position)
+
+    def open_file(self, file_path):
+        """打开文件"""
+        if not os.path.exists(file_path):
+            QMessageBox.warning(self, "错误", "文件不存在")
+            return
+            
+        if os.path.isfile(file_path):
+            try:
+                if sys.platform == "win32":
+                    os.startfile(file_path)
+                elif sys.platform == "darwin":  # macOS
+                    subprocess.call(["open", file_path])
+                else:  # Linux
+                    subprocess.call(["xdg-open", file_path])
+            except Exception as e:
+                QMessageBox.warning(self, "打开文件失败", f"无法打开文件: {str(e)}")
+        else:
+            QMessageBox.warning(self, "错误", "这不是一个文件")
+            
+    def open_folder(self, folder_path):
+        """打开文件夹（进入该文件夹）"""
+        if not os.path.exists(folder_path):
+            QMessageBox.warning(self, "错误", "文件夹不存在")
+            return
+            
+        if os.path.isdir(folder_path):
+            self.set_root_path(folder_path)
+        else:
+            QMessageBox.warning(self, "错误", "这不是一个文件夹")
+
+    def delete_file(self, file_path):
+        """删除单个文件或文件夹（兼容方法）"""
+        self.delete_files([file_path])
+
+    def delete_files(self, file_paths):
+        """删除多个文件或文件夹"""
+        if not file_paths:
+            return
+            
+        # 过滤出存在的文件
+        existing_paths = [path for path in file_paths if os.path.exists(path)]
+        if not existing_paths:
+            QMessageBox.warning(self, "错误", "选中的文件或文件夹都不存在")
+            return
+            
+        # 统计文件和文件夹数量
+        folders = [path for path in existing_paths if os.path.isdir(path)]
+        files = [path for path in existing_paths if os.path.isfile(path)]
+        
+        # 构建确认消息
+        if len(existing_paths) == 1:
+            file_name = os.path.basename(existing_paths[0])
+            if os.path.isdir(existing_paths[0]):
+                message = f"确定要删除文件夹 '{file_name}' 及其所有内容吗？\n这个操作不可撤销。"
+            else:
+                message = f"确定要删除文件 '{file_name}' 吗？\n这个操作不可撤销。"
+        else:
+            items = []
+            if folders:
+                items.append(f"{len(folders)} 个文件夹")
+            if files:
+                items.append(f"{len(files)} 个文件")
+            items_text = "和".join(items)
+            message = f"确定要删除 {items_text} 吗？\n"
+            if folders:
+                message += "文件夹及其所有内容将被删除。\n"
+            message += "这个操作不可撤销。"
+            
+        reply = QMessageBox.question(
+            self, "确认删除", 
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            success_count = 0
+            failed_items = []
+            
+            for file_path in existing_paths:
+                try:
+                    if os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                    else:
+                        os.remove(file_path)
+                    success_count += 1
+                except Exception as e:
+                    failed_items.append(f"{os.path.basename(file_path)}: {str(e)}")
+            
+            # 刷新视图
+            self.refresh_view()
+            
+            # 显示结果
+            if success_count > 0:
+                if len(existing_paths) == 1:
+                    QMessageBox.information(self, "删除成功", f"已删除 '{os.path.basename(existing_paths[0])}'")
+                else:
+                    QMessageBox.information(self, "删除成功", f"成功删除 {success_count} 个项目")
+            
+            if failed_items:
+                error_message = "以下项目删除失败：\n" + "\n".join(failed_items)
+                QMessageBox.critical(self, "删除失败", error_message)
+
+    def rename_file(self, file_path):
+        """重命名文件或文件夹"""
+        if not os.path.exists(file_path):
+            QMessageBox.warning(self, "错误", "文件或文件夹不存在")
+            return
+            
+        old_name = os.path.basename(file_path)
+        new_name, ok = QInputDialog.getText(
+            self, "重命名", 
+            f"请输入新名称:", 
+            text=old_name
+        )
+        
+        if ok and new_name and new_name != old_name:
+            if not new_name.strip():
+                QMessageBox.warning(self, "错误", "名称不能为空")
+                return
+                
+            new_path = os.path.join(os.path.dirname(file_path), new_name)
+            
+            if os.path.exists(new_path):
+                QMessageBox.warning(self, "错误", f"名称 '{new_name}' 已经存在")
+                return
+                
+            try:
+                os.rename(file_path, new_path)
+                self.refresh_view()
+                QMessageBox.information(self, "成功", f"已重命名为 '{new_name}'")
+            except Exception as e:
+                QMessageBox.critical(self, "重命名失败", f"无法重命名: {str(e)}")
+
+    def create_folder(self, parent_path):
+        """在指定路径创建新文件夹"""
+        if not os.path.exists(parent_path) or not os.path.isdir(parent_path):
+            QMessageBox.warning(self, "错误", "目标路径不存在或不是文件夹")
+            return
+            
+        folder_name, ok = QInputDialog.getText(
+            self, "新建文件夹", 
+            "请输入文件夹名称:",
+            text="新建文件夹"
+        )
+        
+        if ok and folder_name:
+            if not folder_name.strip():
+                QMessageBox.warning(self, "错误", "文件夹名称不能为空")
+                return
+                
+            new_folder_path = os.path.join(parent_path, folder_name)
+            
+            if os.path.exists(new_folder_path):
+                QMessageBox.warning(self, "错误", f"文件夹 '{folder_name}' 已经存在")
+                return
+                
+            try:
+                os.makedirs(new_folder_path)
+                self.refresh_view()
+                QMessageBox.information(self, "成功", f"已创建文件夹 '{folder_name}'")
+            except Exception as e:
+                QMessageBox.critical(self, "创建失败", f"无法创建文件夹: {str(e)}")
+                
+    def create_file(self, parent_path):
+        """在指定路径创建新文件"""
+        if not os.path.exists(parent_path) or not os.path.isdir(parent_path):
+            QMessageBox.warning(self, "错误", "目标路径不存在或不是文件夹")
+            return
+            
+        file_name, ok = QInputDialog.getText(
+            self, "新建文件", 
+            "请输入文件名称:",
+            text="新建文件.txt"
+        )
+        
+        if ok and file_name:
+            if not file_name.strip():
+                QMessageBox.warning(self, "错误", "文件名称不能为空")
+                return
+                
+            new_file_path = os.path.join(parent_path, file_name)
+            
+            if os.path.exists(new_file_path):
+                QMessageBox.warning(self, "错误", f"文件 '{file_name}' 已经存在")
+                return
+                
+            try:
+                with open(new_file_path, 'w', encoding='utf-8') as f:
+                    f.write("")  # 创建空文件
+                self.refresh_view()
+                QMessageBox.information(self, "成功", f"已创建文件 '{file_name}'")
+            except Exception as e:
+                QMessageBox.critical(self, "创建失败", f"无法创建文件: {str(e)}")
+                
+    def refresh_view(self):
+        """刷新视图"""
+        current_path = self.get_current_root_path()
+        if current_path:
+            self.set_root_path(current_path)
+            
+    def copy_items(self, file_paths):
+        """复制文件到剪贴板"""
+        self.clipboard_items = file_paths.copy()
+        self.clipboard_operation = "copy"
+        file_names = [os.path.basename(path) for path in file_paths]
+        if len(file_names) == 1:
+            QMessageBox.information(self, "复制", f"已复制 '{file_names[0]}' 到剪贴板")
+        else:
+            QMessageBox.information(self, "复制", f"已复制 {len(file_names)} 个项目到剪贴板")
+            
+    def cut_items(self, file_paths):
+        """剪切文件到剪贴板"""
+        self.clipboard_items = file_paths.copy()
+        self.clipboard_operation = "cut"
+        file_names = [os.path.basename(path) for path in file_paths]
+        if len(file_names) == 1:
+            QMessageBox.information(self, "剪切", f"已剪切 '{file_names[0]}' 到剪贴板")
+        else:
+            QMessageBox.information(self, "剪切", f"已剪切 {len(file_names)} 个项目到剪贴板")
+            
+    def paste_items(self, target_dir):
+        """粘贴剪贴板中的文件"""
+        if not self.clipboard_items:
+            QMessageBox.warning(self, "错误", "剪贴板为空")
+            return
+            
+        if not os.path.exists(target_dir) or not os.path.isdir(target_dir):
+            QMessageBox.warning(self, "错误", "目标路径不存在或不是文件夹")
+            return
+            
+        success_count = 0
+        error_count = 0
+        
+        for source_path in self.clipboard_items:
+            if not os.path.exists(source_path):
+                error_count += 1
+                continue
+                
+            file_name = os.path.basename(source_path)
+            target_path = os.path.join(target_dir, file_name)
+            
+            # 如果目标文件已存在，添加数字后缀
+            counter = 1
+            original_target = target_path
+            while os.path.exists(target_path):
+                name, ext = os.path.splitext(os.path.basename(original_target))
+                target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
+                counter += 1
+            
+            try:
+                if self.clipboard_operation == "copy":
+                    if os.path.isdir(source_path):
+                        shutil.copytree(source_path, target_path)
+                    else:
+                        shutil.copy2(source_path, target_path)
+                elif self.clipboard_operation == "cut":
+                    shutil.move(source_path, target_path)
+                success_count += 1
+            except Exception as e:
+                error_count += 1
+                QMessageBox.warning(self, "操作失败", f"无法处理 '{file_name}': {str(e)}")
+        
+        # 如果是剪切操作，清空剪贴板
+        if self.clipboard_operation == "cut":
+            self.clipboard_items = []
+            self.clipboard_operation = ""
+            
+        # 刷新视图
+        self.refresh_view()
+        
+        # 显示结果
+        if success_count > 0:
+            operation_name = "复制" if self.clipboard_operation == "copy" else "移动"
+            QMessageBox.information(self, "操作完成", f"成功{operation_name} {success_count} 个项目")
+        if error_count > 0:
+            QMessageBox.warning(self, "部分失败", f"有 {error_count} 个项目操作失败")
+            
+    def open_in_explorer(self, dir_path):
+        """在Windows资源管理器中打开目录"""
+        if not os.path.exists(dir_path):
+            QMessageBox.warning(self, "错误", "目录不存在")
+            return
+            
+        try:
+            if sys.platform == "win32":
+                # Windows: 使用explorer打开目录
+                os.startfile(dir_path)
+            elif sys.platform == "darwin":  # macOS
+                subprocess.call(["open", dir_path])
+            else:  # Linux
+                subprocess.call(["xdg-open", dir_path])
+        except Exception as e:
+            QMessageBox.warning(self, "打开失败", f"无法打开目录: {str(e)}") 
