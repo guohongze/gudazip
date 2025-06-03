@@ -5,7 +5,7 @@
 """
 
 from PySide6.QtCore import Qt, QDir, Signal, QModelIndex, QStandardPaths, QSize
-from PySide6.QtGui import QIcon, QAction, QKeyEvent
+from PySide6.QtGui import QIcon, QAction, QKeyEvent, QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeView, QHeaderView, 
     QFileSystemModel, QComboBox, QLabel, QPushButton, QLineEdit, QListView,
@@ -123,6 +123,8 @@ class FileBrowser(QWidget):
     fileSelected = Signal(str)
     # 信号：多个文件被选中
     filesSelected = Signal(list)
+    # 信号：请求打开压缩包
+    archiveOpenRequested = Signal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -130,6 +132,13 @@ class FileBrowser(QWidget):
         # 剪贴板操作相关
         self.clipboard_items = []  # 剪贴板中的文件路径
         self.clipboard_operation = ""  # "copy" 或 "cut"
+        
+        # 压缩包查看模式相关
+        self.archive_viewing_mode = False  # 是否处于压缩包查看模式
+        self.archive_model = None  # 压缩包内容模型
+        self.archive_path = None  # 当前压缩包路径
+        self.archive_current_dir = ""  # 压缩包内当前目录
+        self.archive_file_list = []  # 压缩包文件列表
         
         # 设置焦点策略，使其能接收键盘事件
         self.setFocusPolicy(Qt.StrongFocus)
@@ -646,6 +655,10 @@ class FileBrowser(QWidget):
         
     def set_root_path(self, path):
         """设置根路径"""
+        # 如果处于压缩包查看模式，不允许设置文件系统路径
+        if self.archive_viewing_mode:
+            return
+            
         if path == "ThisPC":
             # 处理"此电脑"
             self.file_model.setRootPath("")
@@ -682,6 +695,25 @@ class FileBrowser(QWidget):
             
     def update_up_button_state(self):
         """更新向上按钮的启用状态"""
+        if self.archive_viewing_mode:
+            # 压缩包查看模式下的逻辑
+            if self.archive_current_dir == "":
+                # 在压缩包根目录，可以退出压缩包查看模式
+                self.up_button.setEnabled(True)
+                self.up_button.setToolTip("退出压缩包查看")
+            else:
+                # 在子目录，可以返回上一级
+                self.up_button.setEnabled(True)
+                parent_dir = os.path.dirname(self.archive_current_dir)
+                if parent_dir == self.archive_current_dir:
+                    parent_dir = ""
+                if parent_dir:
+                    self.up_button.setToolTip(f"返回到: {os.path.basename(parent_dir)}")
+                else:
+                    self.up_button.setToolTip("返回到压缩包根目录")
+            return
+            
+        # 文件系统模式下的原有逻辑
         current_path = self.get_current_root_path()
         
         # 如果当前在"此电脑"或者是根目录，禁用向上按钮
@@ -737,6 +769,29 @@ class FileBrowser(QWidget):
             
     def go_up_directory(self):
         """返回上一级目录"""
+        if self.archive_viewing_mode:
+            # 压缩包查看模式下的逻辑
+            if self.archive_current_dir == "":
+                # 在压缩包根目录，退出压缩包查看模式
+                # 查找主窗口并调用退出方法
+                parent_widget = self.parent()
+                while parent_widget:
+                    if hasattr(parent_widget, 'exit_archive_mode'):
+                        parent_widget.exit_archive_mode()
+                        return
+                    parent_widget = parent_widget.parent()
+                # 如果找不到主窗口，直接退出压缩包模式
+                self.exit_archive_mode()
+                return
+            else:
+                # 返回上一级目录
+                parent_dir = os.path.dirname(self.archive_current_dir)
+                if parent_dir == self.archive_current_dir:
+                    parent_dir = ""
+                self.navigate_archive_directory(parent_dir)
+            return
+            
+        # 文件系统模式下的原有逻辑
         current_path = self.get_current_root_path()
         if not current_path or current_path == "":
             # 当前在"此电脑"，无法再向上
@@ -755,6 +810,10 @@ class FileBrowser(QWidget):
         
     def on_search_text_changed(self, text):
         """搜索文本改变事件"""
+        # 在压缩包查看模式下禁用搜索
+        if self.archive_viewing_mode:
+            return
+            
         if not text.strip():
             # 清空搜索，显示所有文件
             self.file_model.setNameFilters([])
@@ -772,19 +831,47 @@ class FileBrowser(QWidget):
     def on_item_clicked(self, index: QModelIndex):
         """处理单击事件"""
         if index.isValid():
-            file_path = self.file_model.filePath(index)
-            self.fileSelected.emit(file_path)
+            if self.archive_viewing_mode:
+                # 压缩包查看模式下，发送压缩包中的文件路径
+                file_path = index.data(Qt.UserRole + 1)
+                if file_path:
+                    self.fileSelected.emit(file_path)
+            else:
+                # 文件系统模式
+                file_path = self.file_model.filePath(index)
+                self.fileSelected.emit(file_path)
             
     def on_item_double_clicked(self, index: QModelIndex):
         """处理双击事件"""
-        if index.isValid():
+        if not index.isValid():
+            return
+            
+        if self.archive_viewing_mode:
+            # 压缩包查看模式下的双击处理
+            item_type = index.data(Qt.UserRole)
+            if item_type == 'folder':
+                # 双击文件夹，进入该文件夹
+                folder_path = index.data(Qt.UserRole + 1)
+                self.navigate_archive_directory(folder_path)
+            elif item_type == 'file':
+                # 双击文件，可以考虑添加解压预览功能
+                file_path = index.data(Qt.UserRole + 1)
+                print(f"双击压缩包中的文件: {file_path}")
+                # TODO: 实现文件预览或解压功能
+        else:
+            # 文件系统模式下的原有逻辑
             file_path = self.file_model.filePath(index)
             if self.file_model.isDir(index):
                 # 如果是文件夹，进入该文件夹
                 self.set_root_path(file_path)
             else:
-                # 如果是文件，发送选中信号
-                self.fileSelected.emit(file_path)
+                # 如果是文件，检查是否为压缩文件
+                if self.is_archive_file(file_path):
+                    # 压缩文件，发送打开压缩包信号
+                    self.archiveOpenRequested.emit(file_path)
+                else:
+                    # 普通文件，发送选中信号
+                    self.fileSelected.emit(file_path)
                 
     def on_selection_changed(self):
         """处理选择变化事件"""
@@ -938,6 +1025,12 @@ class FileBrowser(QWidget):
             return
             
         if os.path.isfile(file_path):
+            # 检查是否为压缩文件
+            if self.is_archive_file(file_path):
+                # 压缩文件，发送打开压缩包信号
+                self.archiveOpenRequested.emit(file_path)
+                return
+                
             try:
                 if sys.platform == "win32":
                     os.startfile(file_path)
@@ -1300,3 +1393,195 @@ class FileBrowser(QWidget):
                 return os.geteuid() == 0
         except:
             return False 
+
+    def is_archive_file(self, file_path):
+        """检查文件是否为支持的压缩包格式"""
+        if not os.path.isfile(file_path):
+            return False
+            
+        # 支持的压缩文件扩展名
+        archive_extensions = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz']
+        _, ext = os.path.splitext(file_path.lower())
+        return ext in archive_extensions 
+
+    def navigate_archive_directory(self, directory):
+        """在压缩包中导航到指定目录"""
+        if not self.archive_viewing_mode:
+            return
+            
+        self.archive_current_dir = directory
+        # 重新显示当前目录的内容
+        self.display_archive_directory_content()
+        # 更新向上按钮状态
+        self.update_up_button_state()
+        # 更新路径显示
+        if directory:
+            display_path = f"{os.path.basename(self.archive_path)}/{directory}"
+        else:
+            display_path = os.path.basename(self.archive_path)
+        self.path_combo.lineEdit().setText(display_path)
+    
+    def display_archive_directory_content(self):
+        """显示压缩包当前目录的内容"""
+        if not self.archive_viewing_mode or not self.archive_model:
+            return
+            
+        # 清空模型
+        self.archive_model.clear()
+        self.archive_model.setHorizontalHeaderLabels(["名称", "大小", "类型", "修改时间"])
+        
+        # 获取当前目录下的文件和文件夹
+        current_items = {}  # 文件夹和文件的字典
+        
+        # 遍历压缩包中的所有文件
+        for file_info in getattr(self, 'archive_file_list', []):
+            file_path = file_info.get('path', '').replace('\\', '/')
+            
+            # 检查文件是否在当前目录下
+            if self.archive_current_dir:
+                if not file_path.startswith(self.archive_current_dir + '/'):
+                    continue
+                # 获取相对于当前目录的路径
+                relative_path = file_path[len(self.archive_current_dir) + 1:]
+            else:
+                relative_path = file_path
+            
+            # 检查是否为直接子项（不包含更深层的路径分隔符）
+            path_parts = relative_path.split('/')
+            
+            if len(path_parts) == 1:
+                # 直接文件
+                item_name = path_parts[0]
+                if item_name and item_name not in current_items:
+                    current_items[item_name] = {
+                        'type': 'file',
+                        'info': file_info,
+                        'name': item_name
+                    }
+            elif len(path_parts) > 1:
+                # 文件夹中的文件，需要创建文件夹项
+                folder_name = path_parts[0]
+                if folder_name and folder_name not in current_items:
+                    current_items[folder_name] = {
+                        'type': 'folder',
+                        'name': folder_name,
+                        'path': f"{self.archive_current_dir}/{folder_name}" if self.archive_current_dir else folder_name
+                    }
+        
+        # 添加项目到模型
+        for item_name, item_data in sorted(current_items.items()):
+            if item_data['type'] == 'folder':
+                # 文件夹
+                name_item = QStandardItem(item_name)
+                name_item.setIcon(qta.icon('fa5s.folder', color='#ffc107'))
+                name_item.setData('folder', Qt.UserRole)
+                name_item.setData(item_data['path'], Qt.UserRole + 1)
+                
+                size_item = QStandardItem("")
+                type_item = QStandardItem("文件夹")
+                time_item = QStandardItem("")
+                
+            else:
+                # 文件
+                file_info = item_data['info']
+                name_item = QStandardItem(item_name)
+                
+                # 根据文件扩展名设置图标
+                ext = os.path.splitext(item_name)[1].lower()
+                if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
+                    name_item.setIcon(qta.icon('fa5s.image', color='#4caf50'))
+                elif ext in ['.txt', '.md', '.log']:
+                    name_item.setIcon(qta.icon('fa5s.file-alt', color='#ff9800'))
+                elif ext in ['.zip', '.rar', '.7z']:
+                    name_item.setIcon(qta.icon('fa5s.file-archive', color='#9c27b0'))
+                else:
+                    name_item.setIcon(qta.icon('fa5s.file', color='#2196f3'))
+                
+                name_item.setData('file', Qt.UserRole)
+                name_item.setData(file_info.get('path', ''), Qt.UserRole + 1)
+                
+                size_item = QStandardItem(self.format_file_size(file_info.get('size', 0)))
+                type_item = QStandardItem(self.get_file_type(item_name))
+                time_item = QStandardItem(file_info.get('modified_time', ''))
+            
+            self.archive_model.appendRow([name_item, size_item, type_item, time_item])
+    
+    def format_file_size(self, size_bytes):
+        """格式化文件大小"""
+        if size_bytes == 0:
+            return "0 B"
+        
+        size_names = ["B", "KB", "MB", "GB", "TB"]
+        i = 0
+        while size_bytes >= 1024 and i < len(size_names) - 1:
+            size_bytes /= 1024.0
+            i += 1
+        
+        return f"{size_bytes:.1f} {size_names[i]}"
+    
+    def get_file_type(self, file_path):
+        """获取文件类型描述"""
+        if not file_path:
+            return "文件"
+        
+        ext = os.path.splitext(file_path)[1].lower()
+        type_map = {
+            '.txt': '文本文件',
+            '.doc': 'Word文档',
+            '.docx': 'Word文档',
+            '.pdf': 'PDF文档',
+            '.jpg': 'JPEG图像',
+            '.jpeg': 'JPEG图像',
+            '.png': 'PNG图像',
+            '.gif': 'GIF图像',
+            '.bmp': 'BMP图像',
+            '.mp3': 'MP3音频',
+            '.mp4': 'MP4视频',
+            '.avi': 'AVI视频',
+            '.zip': 'ZIP压缩包',
+            '.rar': 'RAR压缩包',
+            '.7z': '7-Zip压缩包',
+        }
+        
+        return type_map.get(ext, '文件') 
+
+    def enter_archive_mode(self, archive_path, archive_file_list):
+        """进入压缩包查看模式"""
+        self.archive_viewing_mode = True
+        self.archive_path = archive_path
+        self.archive_file_list = archive_file_list
+        self.archive_current_dir = ""
+        
+        # 创建压缩包内容模型
+        self.archive_model = QStandardItemModel()
+        
+        # 设置视图使用压缩包模型
+        self.tree_view.setModel(self.archive_model)
+        self.list_view.setModel(self.archive_model)
+        
+        # 显示压缩包根目录内容
+        self.display_archive_directory_content()
+        
+        # 设置列宽
+        self.setup_tree_columns()
+        
+        # 更新向上按钮状态
+        self.update_up_button_state()
+        
+        # 更新路径显示
+        self.path_combo.lineEdit().setText(os.path.basename(archive_path))
+    
+    def exit_archive_mode(self):
+        """退出压缩包查看模式"""
+        self.archive_viewing_mode = False
+        self.archive_path = None
+        self.archive_file_list = []
+        self.archive_current_dir = ""
+        self.archive_model = None
+        
+        # 恢复文件系统模型
+        self.tree_view.setModel(self.file_model)
+        self.list_view.setModel(self.file_model)
+        
+        # 更新向上按钮状态
+        self.update_up_button_state() 

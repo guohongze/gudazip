@@ -14,6 +14,8 @@ from PySide6.QtCore import Qt, QDir, QUrl, QSize
 from PySide6.QtGui import QAction, QIcon, QStandardItemModel, QStandardItem, QFont
 import os
 import qtawesome as qta
+import subprocess
+import sys
 
 from .ui.file_browser import FileBrowser
 from .ui.create_archive_dialog import CreateArchiveDialog
@@ -27,6 +29,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.archive_manager = ArchiveManager()
+        
         self.init_ui()
         self.setup_actions()
         self.setup_menus()
@@ -61,6 +64,8 @@ class MainWindow(QMainWindow):
         self.file_browser.fileSelected.connect(self.on_file_selected)
         # 连接多选信号
         self.file_browser.filesSelected.connect(self.on_files_selected)
+        # 连接打开压缩包信号 - 在文件浏览器内查看
+        self.file_browser.archiveOpenRequested.connect(self.open_archive_in_browser)
         
     def setup_actions(self):
         """设置动作"""
@@ -75,6 +80,19 @@ class MainWindow(QMainWindow):
         self.action_extract.setIcon(qta.icon('fa5s.file-export', color='#1976d2'))
         self.action_extract.setShortcut("Ctrl+E")
         self.action_extract.triggered.connect(self.extract_archive)
+        
+        # 打开压缩包 - 简单版本
+        self.action_open_archive = QAction("打开", self)
+        self.action_open_archive.setIcon(qta.icon('fa5s.folder-open', color='#ff9800'))
+        self.action_open_archive.setShortcut("Ctrl+O")
+        self.action_open_archive.triggered.connect(self.open_archive_simple)
+        
+        # 返回文件系统按钮 - 在setup_actions中创建，但初始禁用
+        self.action_back_to_filesystem = QAction("返回文件系统", self)
+        self.action_back_to_filesystem.setIcon(qta.icon('fa5s.arrow-left', color='#2196f3'))
+        self.action_back_to_filesystem.setShortcut("Ctrl+B")
+        self.action_back_to_filesystem.triggered.connect(self.exit_archive_mode)
+        self.action_back_to_filesystem.setEnabled(False)  # 初始时禁用
         
         # 刷新动作 (F5快捷键)
         self.action_refresh = QAction("刷新", self)
@@ -98,8 +116,10 @@ class MainWindow(QMainWindow):
         
         # 文件菜单
         file_menu = menubar.addMenu("文件")
-        file_menu.addAction(self.action_new_archive)
+        file_menu.addAction(self.action_open_archive)
+        file_menu.addAction(self.action_back_to_filesystem)
         file_menu.addSeparator()
+        file_menu.addAction(self.action_new_archive)
         file_menu.addAction(self.action_extract)
         file_menu.addSeparator()
         file_menu.addAction("退出", self.close)
@@ -158,6 +178,10 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.action_new_archive)
         toolbar.addSeparator()
         toolbar.addAction(self.action_extract)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_open_archive)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_back_to_filesystem)
         
     def setup_statusbar(self):
         """设置状态栏"""
@@ -174,7 +198,7 @@ class MainWindow(QMainWindow):
     def on_file_selected(self, file_path):
         """文件选择事件处理"""
         if self.archive_manager.is_archive_file(file_path):
-            # 压缩包文件，显示信息或执行操作
+            # 压缩包文件，显示信息
             self.path_label.setText(f"压缩包：{file_path}")
         else:
             self.path_label.setText(f"当前：{file_path}")
@@ -303,12 +327,6 @@ class MainWindow(QMainWindow):
                 # 解压完成，更新状态
                 self.path_label.setText("解压完成")
                 
-                # 可选：在文件浏览器中显示解压后的文件夹
-                extract_path = dialog.target_edit.text()
-                if os.path.exists(extract_path):
-                    # 可以在这里添加打开文件夹的功能
-                    pass
-                    
         except Exception as e:
             QMessageBox.critical(self, "错误", f"无法打开解压对话框：{str(e)}")
         
@@ -355,9 +373,93 @@ class MainWindow(QMainWindow):
 
     def refresh_view(self):
         """刷新视图"""
-        print("F5刷新被触发")  # 调试信息
         # 调用文件浏览器的刷新功能
         if hasattr(self, 'file_browser'):
             self.file_browser.refresh_view()
         else:
-            print("file_browser不存在") 
+            print("file_browser不存在")
+            
+    def open_archive_simple(self):
+        """简单的打开压缩包功能 - 工具栏按钮"""
+        # 选择压缩包文件
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "打开压缩包", "",
+            "压缩包文件 (*.zip *.rar *.7z *.tar *.gz *.bz2);;所有文件 (*.*)"
+        )
+        
+        if file_path and os.path.exists(file_path):
+            self.open_archive_in_browser(file_path)
+    
+    def open_archive_with_system(self, file_path):
+        """使用系统默认程序打开压缩包"""
+        try:
+            if sys.platform == "win32":
+                # Windows: 使用explorer直接打开压缩包
+                subprocess.run(['explorer', file_path], check=True)
+            elif sys.platform == "darwin":  # macOS
+                subprocess.run(['open', file_path], check=True)
+            else:  # Linux
+                subprocess.run(['xdg-open', file_path], check=True)
+            
+            self.path_label.setText(f"已打开压缩包：{os.path.basename(file_path)}")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"无法打开压缩包：{str(e)}")
+    
+    def load_archive_from_commandline(self, archive_path):
+        """从命令行加载压缩包 - 在文件浏览器内查看"""
+        # 在文件浏览器内查看
+        self.open_archive_in_browser(archive_path)
+    
+    def open_archive_in_browser(self, file_path):
+        """在文件浏览器内查看压缩包"""
+        try:
+            # 检查是否为支持的压缩包
+            if not self.archive_manager.is_archive_file(file_path):
+                QMessageBox.warning(self, "错误", "不支持的压缩文件格式")
+                return
+            
+            # 获取压缩包信息
+            archive_info = self.archive_manager.get_archive_info(file_path)
+            if not archive_info:
+                QMessageBox.critical(self, "错误", "无法读取压缩包信息")
+                return
+            
+            # 进入压缩包查看模式
+            archive_files = archive_info.get('files', [])
+            self.file_browser.enter_archive_mode(file_path, archive_files)
+            
+            # 更新状态栏和窗口标题
+            file_count = len(archive_files)
+            self.path_label.setText(f"压缩包：{os.path.basename(file_path)} ({file_count} 个文件)")
+            
+            # 启用返回按钮
+            self.action_back_to_filesystem.setEnabled(True)
+            
+            # 在窗口标题中显示当前压缩包
+            base_title = "GudaZip"
+            import main
+            if main.is_admin():
+                base_title = "GudaZip - 管理员模式"
+            self.setWindowTitle(f"{base_title} - {os.path.basename(file_path)}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开压缩包失败：{str(e)}")
+    
+    def exit_archive_mode(self):
+        """退出压缩包查看模式"""
+        # 使用文件浏览器的退出方法
+        self.file_browser.exit_archive_mode()
+        
+        # 禁用返回文件系统按钮
+        self.action_back_to_filesystem.setEnabled(False)
+        
+        # 恢复窗口标题
+        base_title = "GudaZip"
+        import main
+        if main.is_admin():
+            base_title = "GudaZip - 管理员模式"
+        self.setWindowTitle(base_title)
+        
+        # 更新状态栏
+        self.path_label.setText("就绪")
+    

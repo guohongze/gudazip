@@ -103,9 +103,25 @@ def main():
         print("✅ 以管理员权限运行")
     else:
         window.setWindowTitle("GudaZip")
-        print("🏠 以普通模式运行")
+        print("以普通模式运行")
+    
+    # 检查命令行参数中是否有文件路径
+    archive_file = None
+    for arg in sys.argv[1:]:
+        if not arg.startswith('--') and os.path.isfile(arg):
+            # 检查是否为支持的压缩文件
+            archive_extensions = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz']
+            _, ext = os.path.splitext(arg.lower())
+            if ext in archive_extensions:
+                archive_file = os.path.abspath(arg)
+                break
     
     window.show()
+    
+    # 如果有压缩文件参数，在窗口显示后打开它
+    if archive_file:
+        # 使用简单的系统打开方式
+        window.load_archive_from_commandline(archive_file)
     
     return app.exec()
 
