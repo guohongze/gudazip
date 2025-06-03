@@ -33,6 +33,9 @@ class MainWindow(QMainWindow):
         self.setup_toolbar()
         self.setup_statusbar()
         
+        # 添加刷新动作到主窗口，使F5快捷键在整个窗口中生效
+        self.addAction(self.action_refresh)
+        
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("GudaZip - Python桌面压缩管理器")
@@ -62,34 +65,22 @@ class MainWindow(QMainWindow):
     def setup_actions(self):
         """设置动作"""
         # 新建压缩包
-        self.action_new_archive = QAction("新建压缩包", self)
+        self.action_new_archive = QAction("压缩", self)
         self.action_new_archive.setIcon(qta.icon('fa5s.file-archive', color='#2e7d32'))
         self.action_new_archive.setShortcut("Ctrl+N")
         self.action_new_archive.triggered.connect(self.new_archive)
         
-        # 打开压缩包
-        self.action_open_archive = QAction("打开压缩包", self)
-        self.action_open_archive.setIcon(qta.icon('fa5s.folder-open', color='#f57c00'))
-        self.action_open_archive.setShortcut("Ctrl+O")
-        self.action_open_archive.triggered.connect(self.open_archive)
-        
         # 解压到文件夹
-        self.action_extract = QAction("解压到...", self)
+        self.action_extract = QAction("解压", self)
         self.action_extract.setIcon(qta.icon('fa5s.file-export', color='#1976d2'))
         self.action_extract.setShortcut("Ctrl+E")
         self.action_extract.triggered.connect(self.extract_archive)
         
-        # 添加文件
-        self.action_add_files = QAction("添加文件", self)
-        self.action_add_files.setIcon(qta.icon('fa5s.plus-circle', color='#388e3c'))
-        self.action_add_files.setShortcut("Ctrl+A")
-        self.action_add_files.triggered.connect(self.add_files)
-        
-        # 测试压缩包
-        self.action_test = QAction("测试压缩包", self)
-        self.action_test.setIcon(qta.icon('fa5s.check-circle', color='#7b1fa2'))
-        self.action_test.setShortcut("Ctrl+T")
-        self.action_test.triggered.connect(self.test_archive)
+        # 刷新动作 (F5快捷键)
+        self.action_refresh = QAction("刷新", self)
+        self.action_refresh.setIcon(qta.icon('fa5s.sync-alt', color='#2196f3'))
+        self.action_refresh.setShortcut("F5")
+        self.action_refresh.triggered.connect(self.refresh_view)
         
         # 设置
         self.action_settings = QAction("设置", self)
@@ -108,17 +99,17 @@ class MainWindow(QMainWindow):
         # 文件菜单
         file_menu = menubar.addMenu("文件")
         file_menu.addAction(self.action_new_archive)
-        file_menu.addAction(self.action_open_archive)
         file_menu.addSeparator()
         file_menu.addAction(self.action_extract)
-        file_menu.addAction(self.action_add_files)
         file_menu.addSeparator()
         file_menu.addAction("退出", self.close)
         
+        # 视图菜单
+        view_menu = menubar.addMenu("视图")
+        view_menu.addAction(self.action_refresh)
+        
         # 工具菜单
         tools_menu = menubar.addMenu("工具")
-        tools_menu.addAction(self.action_test)
-        tools_menu.addSeparator()
         tools_menu.addAction(self.action_settings)
         
         # 帮助菜单
@@ -165,12 +156,8 @@ class MainWindow(QMainWindow):
         
         # 添加动作到工具栏
         toolbar.addAction(self.action_new_archive)
-        toolbar.addAction(self.action_open_archive)
         toolbar.addSeparator()
         toolbar.addAction(self.action_extract)
-        toolbar.addAction(self.action_add_files)
-        toolbar.addSeparator()
-        toolbar.addAction(self.action_test)
         
     def setup_statusbar(self):
         """设置状态栏"""
@@ -282,16 +269,6 @@ class MainWindow(QMainWindow):
             # 对话框中已经处理了创建过程
             self.path_label.setText("压缩包创建完成")
             
-    def open_archive(self):
-        """打开压缩包"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "打开压缩包", "",
-            "压缩包文件 (*.zip *.rar *.7z *.tar *.gz *.bz2);;所有文件 (*.*)"
-        )
-        if file_path:
-            # 可以在这里添加压缩包查看功能
-            QMessageBox.information(self, "压缩包", f"已选择压缩包：{file_path}")
-            
     def extract_archive(self):
         """解压压缩包"""
         # 获取当前选择的压缩包路径
@@ -335,16 +312,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"无法打开解压对话框：{str(e)}")
         
-    def add_files(self):
-        """添加文件到压缩包"""
-        # TODO: 实现添加文件功能
-        QMessageBox.information(self, "提示", "添加文件功能开发中...")
-        
-    def test_archive(self):
-        """测试压缩包"""
-        # TODO: 实现测试功能
-        QMessageBox.information(self, "提示", "测试功能开发中...")
-        
     def show_settings(self):
         """显示设置对话框"""
         # TODO: 实现设置对话框
@@ -385,3 +352,12 @@ class MainWindow(QMainWindow):
                 self.setWindowIcon(icon)
             except:
                 pass  # 如果备选图标也失败，则使用系统默认图标 
+
+    def refresh_view(self):
+        """刷新视图"""
+        print("F5刷新被触发")  # 调试信息
+        # 调用文件浏览器的刷新功能
+        if hasattr(self, 'file_browser'):
+            self.file_browser.refresh_view()
+        else:
+            print("file_browser不存在") 

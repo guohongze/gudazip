@@ -141,29 +141,6 @@ class RarHandler:
         except Exception as e:
             raise Exception(f"解压失败: {e}")
             
-    def test_archive(self, file_path: str, password: Optional[str] = None) -> bool:
-        """测试RAR文件完整性"""
-        if not RARFILE_AVAILABLE:
-            return False
-            
-        try:
-            with rarfile.RarFile(file_path, 'r') as rf:
-                if password:
-                    rf.setpassword(password)
-                
-                # 测试所有文件
-                test_result = rf.testrar()
-                return test_result is None  # 如果返回None，表示测试通过
-                
-        except rarfile.BadRarFile:
-            return False
-        except rarfile.RarWrongPassword:
-            raise Exception("密码错误")
-        except rarfile.RarCannotExec:
-            return False
-        except Exception:
-            return False
-            
     def _convert_time(self, date_time_tuple) -> str:
         """转换时间格式"""
         try:
@@ -178,12 +155,4 @@ class RarHandler:
     # RAR格式只支持读取，不支持创建和修改
     def create_archive(self, *args, **kwargs):
         """RAR格式不支持创建"""
-        raise Exception("RAR格式不支持创建新的压缩包")
-        
-    def add_files(self, *args, **kwargs):
-        """RAR格式不支持添加文件"""
-        raise Exception("RAR格式不支持添加文件")
-        
-    def remove_files(self, *args, **kwargs):
-        """RAR格式不支持删除文件"""
-        raise Exception("RAR格式不支持删除文件") 
+        raise Exception("RAR格式不支持创建新的压缩包") 

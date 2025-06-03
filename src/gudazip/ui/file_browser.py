@@ -363,6 +363,31 @@ class FileBrowser(QWidget):
         """)
         toolbar_layout.addWidget(self.search_box)
         
+        # 添加刷新按钮
+        self.refresh_button = QPushButton()
+        self.refresh_button.setIcon(qta.icon('fa5s.sync-alt', color='#333'))
+        self.refresh_button.setToolTip("刷新 (F5)")
+        self.refresh_button.setFixedSize(40, 40)  # 与其他按钮保持一致
+        self.refresh_button.setStyleSheet("""
+            QPushButton {
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+                padding: 8px;
+                margin-left: 8px;
+            }
+            QPushButton:hover {
+                background-color: #e3f2fd;
+                border-color: #90caf9;
+            }
+            QPushButton:pressed {
+                background-color: #bbdefb;
+                border-color: #64b5f6;
+            }
+        """)
+        self.refresh_button.clicked.connect(self.refresh_view)
+        toolbar_layout.addWidget(self.refresh_button)
+        
         # 添加弹性空间到最右侧
         toolbar_layout.addStretch()
         
@@ -703,7 +728,6 @@ class FileBrowser(QWidget):
             self.set_root_path("ThisPC")
         elif os.path.exists(path_text) and os.path.isdir(path_text):
             self.set_root_path(path_text)
-            QMessageBox.information(self, "导航成功", f"已跳转到: {path_text}")
         else:
             QMessageBox.warning(self, "路径错误", f"路径不存在或不是文件夹: {path_text}")
             # 恢复为当前路径
@@ -716,7 +740,6 @@ class FileBrowser(QWidget):
         current_path = self.get_current_root_path()
         if not current_path or current_path == "":
             # 当前在"此电脑"，无法再向上
-            QMessageBox.information(self, "提示", "已经在最顶级目录")
             return
             
         parent_path = os.path.dirname(current_path)
@@ -1069,7 +1092,6 @@ class FileBrowser(QWidget):
             try:
                 os.makedirs(new_folder_path)
                 self.refresh_view()
-                QMessageBox.information(self, "成功", f"已创建文件夹 '{folder_name}'")
             except Exception as e:
                 QMessageBox.critical(self, "创建失败", f"无法创建文件夹: {str(e)}")
                 
@@ -1100,7 +1122,6 @@ class FileBrowser(QWidget):
                 with open(new_file_path, 'w', encoding='utf-8') as f:
                     f.write("")  # 创建空文件
                 self.refresh_view()
-                QMessageBox.information(self, "成功", f"已创建文件 '{file_name}'")
             except Exception as e:
                 QMessageBox.critical(self, "创建失败", f"无法创建文件: {str(e)}")
                 
@@ -1108,8 +1129,24 @@ class FileBrowser(QWidget):
         """刷新视图"""
         current_path = self.get_current_root_path()
         if current_path:
-            self.set_root_path(current_path)
+            # 强制刷新文件系统模型
+            self.file_model.setRootPath("")  # 先清空
+            self.file_model.setRootPath(current_path)  # 重新设置
             
+            # 刷新根索引
+            root_index = self.file_model.index(current_path)
+            self.tree_view.setRootIndex(root_index)
+            self.list_view.setRootIndex(root_index)
+            
+            # 强制更新视图
+            self.tree_view.viewport().update()
+            self.list_view.viewport().update()
+            
+            # 重置排序以触发刷新
+            self.tree_view.header().setSortIndicator(0, Qt.AscendingOrder)
+            
+            print(f"已刷新视图: {current_path}")  # 调试信息
+
     def keyPressEvent(self, event: QKeyEvent):
         """处理键盘事件"""
         if event.key() == Qt.Key_F5:
@@ -1128,11 +1165,6 @@ class FileBrowser(QWidget):
             
         self.clipboard_items = file_paths.copy()
         self.clipboard_operation = "copy"
-        file_names = [os.path.basename(path) for path in file_paths]
-        if len(file_names) == 1:
-            QMessageBox.information(self, "复制", f"已复制 '{file_names[0]}' 到剪贴板")
-        else:
-            QMessageBox.information(self, "复制", f"已复制 {len(file_names)} 个项目到剪贴板")
             
     def cut_items(self, file_paths):
         """剪切文件到剪贴板"""
@@ -1142,11 +1174,6 @@ class FileBrowser(QWidget):
             
         self.clipboard_items = file_paths.copy()
         self.clipboard_operation = "cut"
-        file_names = [os.path.basename(path) for path in file_paths]
-        if len(file_names) == 1:
-            QMessageBox.information(self, "剪切", f"已剪切 '{file_names[0]}' 到剪贴板")
-        else:
-            QMessageBox.information(self, "剪切", f"已剪切 {len(file_names)} 个项目到剪贴板")
             
     def paste_items(self, target_dir):
         """粘贴剪贴板中的文件"""
@@ -1198,10 +1225,7 @@ class FileBrowser(QWidget):
         # 刷新视图
         self.refresh_view()
         
-        # 显示结果
-        if success_count > 0:
-            operation_name = "复制" if self.clipboard_operation == "copy" else "移动"
-            QMessageBox.information(self, "操作完成", f"成功{operation_name} {success_count} 个项目")
+        # 显示结果 - 只显示错误信息
         if error_count > 0:
             QMessageBox.warning(self, "部分失败", f"有 {error_count} 个项目操作失败")
             

@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 压缩包管理器
-统一处理各种压缩格式的接口
+统一管理各种压缩格式的处理
 """
 
 import os
-import ctypes
 import sys
-from typing import Dict, List, Optional, Any
+import ctypes
+from typing import List, Dict, Any, Optional
+
 from .zip_handler import ZipHandler
 from .rar_handler import RarHandler
 
@@ -150,54 +151,6 @@ class ArchiveManager:
                 return handler.create_archive(file_path, files, compression_level, password)
             except Exception as e:
                 print(f"创建压缩包失败: {e}")
-                return False
-        return False
-        
-    def add_files_to_archive(self, archive_path: str, files: List[str]) -> bool:
-        """向压缩包添加文件"""
-        if not self.is_archive_file(archive_path):
-            return False
-            
-        _, ext = os.path.splitext(archive_path.lower())
-        handler = self.handlers.get(ext)
-        
-        if handler and hasattr(handler, 'add_files'):
-            try:
-                return handler.add_files(archive_path, files)
-            except Exception as e:
-                print(f"添加文件失败: {e}")
-                return False
-        return False
-        
-    def remove_files_from_archive(self, archive_path: str, files: List[str]) -> bool:
-        """从压缩包删除文件"""
-        if not self.is_archive_file(archive_path):
-            return False
-            
-        _, ext = os.path.splitext(archive_path.lower())
-        handler = self.handlers.get(ext)
-        
-        if handler and hasattr(handler, 'remove_files'):
-            try:
-                return handler.remove_files(archive_path, files)
-            except Exception as e:
-                print(f"删除文件失败: {e}")
-                return False
-        return False
-        
-    def test_archive(self, file_path: str, password: Optional[str] = None) -> bool:
-        """测试压缩包完整性"""
-        if not self.is_archive_file(file_path):
-            return False
-            
-        _, ext = os.path.splitext(file_path.lower())
-        handler = self.handlers.get(ext)
-        
-        if handler and hasattr(handler, 'test_archive'):
-            try:
-                return handler.test_archive(file_path, password)
-            except Exception as e:
-                print(f"测试压缩包失败: {e}")
                 return False
         return False
         
