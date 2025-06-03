@@ -36,7 +36,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("GudaZip - Python桌面压缩管理器")
-        self.setMinimumSize(1200, 700)
+        self.setMinimumSize(1000, 700)
         
         # 创建中央部件
         central_widget = QWidget()
