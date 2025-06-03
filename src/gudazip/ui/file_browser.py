@@ -5,7 +5,7 @@
 """
 
 from PySide6.QtCore import Qt, QDir, Signal, QModelIndex, QStandardPaths, QSize
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QIcon, QAction, QKeyEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeView, QHeaderView, 
     QFileSystemModel, QComboBox, QLabel, QPushButton, QLineEdit, QListView,
@@ -130,6 +130,10 @@ class FileBrowser(QWidget):
         # 剪贴板操作相关
         self.clipboard_items = []  # 剪贴板中的文件路径
         self.clipboard_operation = ""  # "copy" 或 "cut"
+        
+        # 设置焦点策略，使其能接收键盘事件
+        self.setFocusPolicy(Qt.StrongFocus)
+        
         self.init_ui()
         
     def init_ui(self):
@@ -1105,6 +1109,16 @@ class FileBrowser(QWidget):
         current_path = self.get_current_root_path()
         if current_path:
             self.set_root_path(current_path)
+            
+    def keyPressEvent(self, event: QKeyEvent):
+        """处理键盘事件"""
+        if event.key() == Qt.Key_F5:
+            # F5键刷新
+            self.refresh_view()
+            event.accept()
+        else:
+            # 传递其他键盘事件给父类处理
+            super().keyPressEvent(event)
             
     def copy_items(self, file_paths):
         """复制文件到剪贴板"""
