@@ -38,6 +38,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("GudaZip - Python桌面压缩管理器")
         self.setMinimumSize(1000, 700)
         
+        # 设置窗口图标
+        self.set_window_icon()
+        
         # 创建中央部件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -353,3 +356,32 @@ class MainWindow(QMainWindow):
                          "GudaZip v0.1.0\n"
                          "Python桌面压缩管理器\n"
                          "基于PySide6开发") 
+
+    def set_window_icon(self):
+        """设置窗口图标"""
+        try:
+            # 获取图标路径
+            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            icon_path = os.path.join(current_dir, "resources", "icons", "app_icon.png")
+            
+            # 检查图标文件是否存在
+            if os.path.exists(icon_path):
+                icon = QIcon(icon_path)
+                self.setWindowIcon(icon)
+                
+                # 同时设置应用程序图标（在任务栏中显示）
+                from PySide6.QtWidgets import QApplication
+                QApplication.instance().setWindowIcon(icon)
+            else:
+                # 如果图标文件不存在，使用FontAwesome图标作为备选
+                icon = qta.icon('fa5s.file-archive', color='#2e7d32')
+                self.setWindowIcon(icon)
+                
+        except Exception as e:
+            print(f"设置图标失败: {e}")
+            # 使用FontAwesome图标作为备选
+            try:
+                icon = qta.icon('fa5s.file-archive', color='#2e7d32')
+                self.setWindowIcon(icon)
+            except:
+                pass  # 如果备选图标也失败，则使用系统默认图标 

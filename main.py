@@ -9,8 +9,8 @@ import sys
 import os
 import ctypes
 import subprocess
-from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import QTranslator, QLocale
+from PySide6.QtWidgets import QApplication, QMessageBox, QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+from PySide6.QtCore import QCoreApplication, QTranslator, QLocale
 from PySide6.QtGui import QIcon
 
 # 添加src目录到Python路径
@@ -85,6 +85,14 @@ def main():
     locale = QLocale.system()
     if translator.load(locale, "gudazip", "_", "resources/translations"):
         app.installTranslator(translator)
+    
+    # 设置应用程序图标
+    try:
+        icon_path = os.path.join(os.path.dirname(__file__), "resources", "icons", "app_icon.png")
+        if os.path.exists(icon_path):
+            app.setWindowIcon(QIcon(icon_path))
+    except Exception as e:
+        print(f"设置应用图标失败: {e}")
     
     # 创建主窗口
     window = MainWindow()

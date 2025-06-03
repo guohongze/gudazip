@@ -4,13 +4,14 @@
 实现左侧的文件系统树状导航
 """
 
+from PySide6.QtCore import Qt, QDir, Signal, QModelIndex, QStandardPaths, QSize
+from PySide6.QtGui import QIcon, QAction
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeView, QHeaderView, 
     QFileSystemModel, QComboBox, QLabel, QPushButton, QLineEdit, QListView,
-    QMenu, QMessageBox, QInputDialog, QApplication, QDialog, QDialogButtonBox
+    QMenu, QMessageBox, QInputDialog, QApplication, QDialog, QDialogButtonBox,
+    QFileIconProvider
 )
-from PySide6.QtCore import Qt, QDir, Signal, QModelIndex, QStandardPaths
-from PySide6.QtGui import QIcon, QAction
 import os
 import shutil
 import subprocess
@@ -18,6 +19,101 @@ import sys
 import qtawesome as qta
 from datetime import datetime
 import ctypes
+from pathlib import Path
+import tempfile
+
+# Windows API 相关导入
+if sys.platform == "win32":
+    try:
+        import win32com.client
+        from win32api import GetFileVersionInfo, LOWORD, HIWORD
+        import win32con
+        import win32gui
+        import win32ui
+        from PIL import Image
+        import tempfile
+        HAS_WIN32 = True
+    except ImportError:
+        HAS_WIN32 = False
+else:
+    HAS_WIN32 = False
+
+
+class EnhancedIconProvider(QFileIconProvider):
+    """增强的图标提供器，专门处理快捷方式和获取高质量图标"""
+    
+    def __init__(self):
+        super().__init__()
+        self._icon_cache = {}  # 图标缓存
+        
+    def _get_enhanced_icon(self, file_path):
+        """获取增强的文件图标"""
+        try:
+            # 只对快捷方式文件进行特殊处理
+            if file_path.lower().endswith('.lnk') and HAS_WIN32:
+                return self._get_shortcut_target_icon(file_path)
+            
+            # 对于所有其他文件类型，完全不干预，让系统自己处理
+            # 这里不应该调用 super().icon()，而是应该返回 None 让系统使用默认行为
+            return None
+            
+        except Exception as e:
+            print(f"获取文件图标时出错 {file_path}: {e}")
+            return None
+    
+    def icon(self, type_or_info):
+        """重写图标获取方法"""
+        if hasattr(type_or_info, 'filePath'):
+            # 处理 QFileInfo 对象
+            file_path = type_or_info.filePath()
+            
+            # 检查缓存
+            if file_path in self._icon_cache:
+                return self._icon_cache[file_path]
+            
+            # 获取增强图标
+            enhanced_icon = self._get_enhanced_icon(file_path)
+            
+            # 如果获取到了增强图标，使用它并缓存
+            if enhanced_icon and not enhanced_icon.isNull():
+                self._icon_cache[file_path] = enhanced_icon
+                return enhanced_icon
+            
+            # 否则使用系统默认行为
+            default_icon = super().icon(type_or_info)
+            self._icon_cache[file_path] = default_icon
+            return default_icon
+        else:
+            # 处理 QFileIconProvider.IconType
+            return super().icon(type_or_info)
+    
+    def _get_shortcut_target_icon(self, lnk_path):
+        """获取快捷方式目标程序的图标"""
+        if not HAS_WIN32:
+            return None
+        
+        try:
+            # 创建 Shell 对象
+            shell = win32com.client.Dispatch("WScript.Shell")
+            shortcut = shell.CreateShortCut(lnk_path)
+            target_path = shortcut.Targetpath
+            
+            # 如果目标路径存在，使用临时QFileSystemModel获取其图标
+            if target_path and os.path.exists(target_path):
+                from PySide6.QtWidgets import QFileSystemModel
+                temp_model = QFileSystemModel()
+                index = temp_model.index(target_path)
+                if index.isValid():
+                    icon = temp_model.fileIcon(index)
+                    if not icon.isNull():
+                        return icon
+            
+            # 如果无法获取目标，返回None让系统使用默认图标
+            return None
+            
+        except Exception as e:
+            print(f"获取快捷方式图标时出错 {lnk_path}: {e}")
+            return None
 
 
 class FileBrowser(QWidget):
@@ -48,6 +144,10 @@ class FileBrowser(QWidget):
         self.file_model.setFilter(
             QDir.AllDirs | QDir.Files | QDir.NoDotAndDotDot
         )
+        
+        # 设置增强的图标提供器，确保显示高质量图标
+        enhanced_icon_provider = EnhancedIconProvider()
+        self.file_model.setIconProvider(enhanced_icon_provider)
         
         # 创建顶部工具栏
         toolbar_layout = QHBoxLayout()
@@ -295,7 +395,21 @@ class FileBrowser(QWidget):
         self.list_view.setResizeMode(QListView.Adjust)
         self.list_view.setSelectionMode(QListView.ExtendedSelection)
         self.list_view.setUniformItemSizes(True)
-        self.list_view.setGridSize(self.list_view.gridSize() * 1.2)  # 稍微增大网格
+        
+        # 设置Windows风格的大图标模式
+        self.list_view.setFlow(QListView.LeftToRight)  # 从左到右流式布局
+        self.list_view.setWrapping(True)  # 启用换行
+        self.list_view.setSpacing(8)  # 设置项目间距
+        
+        # 设置图标和网格大小 - 模仿Windows大图标模式
+        icon_size = 48  # Windows大图标通常是48x48
+        grid_size = 80  # 给图标和文字留足够空间
+        
+        self.list_view.setIconSize(QSize(icon_size, icon_size))
+        self.list_view.setGridSize(QSize(grid_size, grid_size))
+        
+        # 设置移动和拖拽
+        self.list_view.setMovement(QListView.Static)  # 静态排列，不允许拖拽重排
         
         # 设置列表视图的上下文菜单
         self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -379,23 +493,35 @@ class FileBrowser(QWidget):
                 selection-background-color: #e3f2fd;
                 selection-color: #1976d2;
                 outline: none;
-                font-size: 12px;
-                padding: 5px;
+                font-size: 11px;
+                padding: 10px;
+                show-decoration-selected: 1;
             }
             QListView::item {
-                padding: 8px;
-                border: none;
-                border-radius: 4px;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 4px;
                 margin: 2px;
+                text-align: center;
+                min-width: 70px;
+                max-width: 70px;
             }
             QListView::item:hover {
-                background-color: #f5f5f5;
+                background-color: rgba(0, 120, 215, 0.1);
+                border-color: rgba(0, 120, 215, 0.3);
             }
             QListView::item:selected {
-                background-color: #e3f2fd;
+                background-color: rgba(0, 120, 215, 0.15);
+                border-color: #0078d4;
+                color: black;
             }
             QListView::item:selected:active {
-                background-color: #bbdefb;
+                background-color: rgba(0, 120, 215, 0.25);
+                border-color: #005a9e;
+            }
+            QListView::item:focus {
+                border-color: #0078d4;
+                outline: none;
             }
         """)
         
@@ -466,6 +592,28 @@ class FileBrowser(QWidget):
             self.current_view_mode = "详细信息"
             self.view_toggle_btn.setIcon(qta.icon('fa5s.list', color='#333'))
             self.view_toggle_btn.setToolTip("切换到图标视图")
+        
+        # 设置图标视图显示
+        self.setup_icon_view()
+        
+    def setup_icon_view(self):
+        """设置图标视图的显示参数"""
+        # 根据当前视图调整显示
+        if self.current_view == self.list_view:
+            # 确保列表视图显示图标
+            self.list_view.setModelColumn(0)  # 显示第一列（文件名+图标）
+            
+            # 刷新视图
+            current_index = self.list_view.rootIndex()
+            if current_index.isValid():
+                self.list_view.setRootIndex(current_index)
+            
+            # 强制更新视图
+            self.list_view.viewport().update()
+            
+            # 确保项目正确对齐
+            self.list_view.setLayoutMode(QListView.Batched)
+            self.list_view.setBatchSize(100)
         
     def set_root_path(self, path):
         """设置根路径"""
@@ -752,7 +900,6 @@ class FileBrowser(QWidget):
                 # 刷新选项
                 refresh_action = QAction(qta.icon('fa5s.sync-alt', color='#2196f3'), "刷新", self)
                 refresh_action.triggered.connect(self.refresh_view)
-                menu.addAction(refresh_action)
         
         if menu.actions():  # 只有在有菜单项时才显示
             menu.exec(global_position)

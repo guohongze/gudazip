@@ -11,6 +11,10 @@ patool>=1.12.0  # 通用压缩工具接口
 # 图标和主题
 qtawesome>=1.0.0  # 图标库
 
+# Windows API 支持（Windows系统专用）
+pywin32>=306; sys_platform == "win32"  # Windows API 访问
+Pillow>=10.0.0; sys_platform == "win32"  # 图像处理支持
+
 # 开发工具（可选）
 # black>=23.0.0  # 代码格式化
 # pylint>=2.17.0  # 代码检查
