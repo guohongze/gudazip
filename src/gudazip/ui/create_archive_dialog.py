@@ -230,11 +230,12 @@ class CreateArchiveDialog(QDialog):
             self, "选择文件夹"
         )
         
-        if folder_path and folder_path not in self.selected_files:
-            self.selected_files.append(folder_path)
-            item = QListWidgetItem(f"📁 {folder_path}")
-            item.setData(Qt.UserRole, folder_path)
-            self.files_list.addItem(item)
+        if folder_path:
+            if folder_path not in self.selected_files:
+                self.selected_files.append(folder_path)
+                item = QListWidgetItem(f"📁 {folder_path}")
+                item.setData(Qt.UserRole, folder_path)
+                self.files_list.addItem(item)
             
         self.update_ui_state()
         

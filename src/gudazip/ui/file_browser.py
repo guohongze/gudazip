@@ -13,6 +13,8 @@ class FileBrowser(QWidget):
     
     # 信号：文件被选中
     fileSelected = Signal(str)
+    # 信号：多个文件被选中
+    filesSelected = Signal(list)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,9 +50,14 @@ class FileBrowser(QWidget):
         header = self.tree_view.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         
+        # 设置多选模式
+        self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
+        
         # 连接信号
         self.tree_view.clicked.connect(self.on_item_clicked)
         self.tree_view.doubleClicked.connect(self.on_item_double_clicked)
+        # 添加选择变化信号
+        self.tree_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
         
         layout.addWidget(self.tree_view)
         
@@ -74,12 +81,29 @@ class FileBrowser(QWidget):
                 # 如果是文件，发送选中信号
                 self.fileSelected.emit(file_path)
                 
+    def on_selection_changed(self):
+        """处理选择变化事件"""
+        selected_paths = self.get_selected_paths()
+        if selected_paths:
+            self.filesSelected.emit(selected_paths)
+            
     def get_current_path(self):
         """获取当前选中的路径"""
         current_index = self.tree_view.currentIndex()
         if current_index.isValid():
             return self.file_model.filePath(current_index)
         return ""
+        
+    def get_selected_paths(self):
+        """获取所有选中的路径"""
+        selected_indexes = self.tree_view.selectionModel().selectedIndexes()
+        paths = []
+        for index in selected_indexes:
+            if index.column() == 0:  # 只处理第一列（文件名列）
+                path = self.file_model.filePath(index)
+                if path not in paths:
+                    paths.append(path)
+        return sorted(paths)  # 按字母顺序排序
         
     def set_current_path(self, path):
         """设置当前选中的路径"""

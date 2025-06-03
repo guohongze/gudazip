@@ -73,6 +73,8 @@ class MainWindow(QMainWindow):
         
         # 连接信号
         self.file_browser.fileSelected.connect(self.on_file_selected)
+        # 连接多选信号
+        self.file_browser.filesSelected.connect(self.on_files_selected)
         
     def setup_actions(self):
         """设置动作"""
@@ -206,6 +208,17 @@ class MainWindow(QMainWindow):
         else:
             self.path_label.setText(f"当前：{file_path}")
             
+    def on_files_selected(self, files_path):
+        """多文件选择事件处理"""
+        if len(files_path) > 1:
+            # 显示多选状态
+            self.path_label.setText(f"已选择 {len(files_path)} 个项目")
+        elif len(files_path) == 1:
+            # 单选状态
+            self.path_label.setText(f"当前：{files_path[0]}")
+        else:
+            self.path_label.setText("就绪")
+        
     def open_archive_file(self, file_path):
         """打开压缩包文件"""
         try:
@@ -221,7 +234,7 @@ class MainWindow(QMainWindow):
             
             if archive_info:
                 archive_viewer.load_archive(archive_info)
-                tab_name = file_path.split('/')[-1]  # 只显示文件名
+                tab_name = os.path.basename(file_path)  # 只显示文件名
                 self.tab_widget.addTab(archive_viewer, tab_name)
                 self.tab_widget.setCurrentWidget(archive_viewer)
                 
@@ -235,35 +248,77 @@ class MainWindow(QMainWindow):
             
     def new_archive(self):
         """新建压缩包"""
-        # 获取当前选择的文件路径作为默认保存位置
+        # 获取当前选择的文件路径
+        selected_paths = self.file_browser.get_selected_paths()
         current_path = self.file_browser.get_current_path()
-        if current_path and os.path.isfile(current_path):
-            # 如果选择的是文件，使用其目录作为默认位置
-            default_path = os.path.join(os.path.dirname(current_path), "新建压缩包.zip")
-        elif current_path and os.path.isdir(current_path):
-            # 如果选择的是目录，在该目录下创建压缩包
-            default_path = os.path.join(current_path, "新建压缩包.zip")
+        
+        # 确定默认保存路径和文件名
+        default_dir = ""
+        default_name = "新建压缩包"
+        
+        if selected_paths:
+            # 使用选中的文件列表
+            target_files = selected_paths
+            
+            # 确定默认保存目录：使用第一个选中项目的父目录
+            first_path = selected_paths[0]
+            if os.path.isfile(first_path):
+                default_dir = os.path.dirname(first_path)
+            else:
+                default_dir = os.path.dirname(first_path) if os.path.dirname(first_path) else first_path
+            
+            # 确定默认文件名逻辑
+            directories = [p for p in selected_paths if os.path.isdir(p)]
+            files = [p for p in selected_paths if os.path.isfile(p)]
+            
+            if directories:
+                # 如果有目录，优先使用目录名（排序后的第一个）
+                directories.sort()
+                default_name = os.path.basename(directories[0])
+            elif files:
+                # 如果只有文件，使用排序后第一个文件的名称（不包含扩展名）
+                files.sort()
+                default_name = os.path.splitext(os.path.basename(files[0]))[0]
+                
+        elif current_path:
+            # 使用当前路径
+            target_files = [current_path]
+            
+            if os.path.isfile(current_path):
+                default_dir = os.path.dirname(current_path)
+                default_name = os.path.splitext(os.path.basename(current_path))[0]
+            else:
+                default_dir = os.path.dirname(current_path) if os.path.dirname(current_path) else current_path
+                default_name = os.path.basename(current_path)
         else:
-            # 使用用户主目录作为默认位置
-            default_path = os.path.join(os.path.expanduser("~"), "新建压缩包.zip")
+            # 没有选择任何文件
+            target_files = []
+            default_dir = os.path.expanduser("~")
+            default_name = "新建压缩包"
+        
+        # 使用Windows标准路径格式
+        default_path = os.path.join(default_dir, f"{default_name}.zip")
         
         # 创建并显示创建压缩包对话框
         dialog = CreateArchiveDialog(self.archive_manager, default_path, self)
         
-        # 如果当前有选择的文件或目录，预先添加到对话框中
-        if current_path and os.path.exists(current_path):
-            dialog.selected_files.append(current_path)
-            if os.path.isfile(current_path):
-                item_text = f"📄 {current_path}"
-            else:
-                item_text = f"📁 {current_path}"
-            
-            from PySide6.QtWidgets import QListWidgetItem
-            from PySide6.QtCore import Qt
-            item = QListWidgetItem(item_text)
-            item.setData(Qt.UserRole, current_path)
-            dialog.files_list.addItem(item)
-            dialog.update_ui_state()
+        # 预先添加选中的文件到对话框中
+        for file_path in target_files:
+            if os.path.exists(file_path):
+                dialog.selected_files.append(file_path)
+                if os.path.isfile(file_path):
+                    item_text = f"📄 {file_path}"
+                else:
+                    item_text = f"📁 {file_path}"
+                
+                from PySide6.QtWidgets import QListWidgetItem
+                from PySide6.QtCore import Qt
+                item = QListWidgetItem(item_text)
+                item.setData(Qt.UserRole, file_path)
+                dialog.files_list.addItem(item)
+        
+        # 更新对话框状态
+        dialog.update_ui_state()
         
         # 显示对话框
         if dialog.exec() == QDialog.Accepted:
