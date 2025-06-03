@@ -103,18 +103,25 @@ class FileBrowser(QWidget):
                 outline: none;
             }
             QComboBox::drop-down {
-                border: none;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
                 width: 20px;
+                border-left-width: 1px;
+                border-left-color: #d0d0d0;
+                border-left-style: solid;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+                background-color: #f8f9fa;
             }
             QComboBox::down-arrow {
-                image: none;
-                border: none;
-                width: 0px;
-                height: 0px;
-                border-left: 6px solid transparent;
-                border-right: 6px solid transparent;
-                border-top: 6px solid #666;
-                margin-right: 5px;
+                width: 0; 
+                height: 0; 
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent; 
+                border-top: 5px solid #666;
+            }
+            QComboBox::down-arrow:hover {
+                border-top-color: #333;
             }
             QComboBox QAbstractItemView {
                 border: 2px solid #ccc;
@@ -140,19 +147,19 @@ class FileBrowser(QWidget):
         music_path = QStandardPaths.writableLocation(QStandardPaths.MusicLocation)
         home_path = QStandardPaths.writableLocation(QStandardPaths.HomeLocation)
         
-        # 添加Windows标准路径到下拉框，使用更大的图标
+        # 添加Windows11风格图标到下拉框
         windows_paths = [
-            ("📥 桌面", desktop_path),
+            ("🖥️ 桌面", desktop_path),
             ("💻 此电脑", ""),  # 特殊处理
-            ("📁 文档", documents_path),
+            ("📂 文档", documents_path),
             ("🖼️ 图片", pictures_path),
-            ("📥 下载", downloads_path),
+            ("⬇️ 下载", downloads_path),
             ("🎬 视频", videos_path),
             ("🎵 音乐", music_path),
-            ("🏠 用户目录", home_path),
-            ("💾 C盘", "C:\\"),
-            ("💾 D盘", "D:\\"),
-            ("💾 E盘", "E:\\"),
+            ("👤 用户", home_path),
+            ("💾 本地磁盘 (C:)", "C:\\"),
+            ("💾 本地磁盘 (D:)", "D:\\"),
+            ("💾 本地磁盘 (E:)", "E:\\"),
         ]
         
         for name, path in windows_paths:
