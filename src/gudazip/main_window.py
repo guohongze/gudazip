@@ -10,9 +10,10 @@ from PySide6.QtWidgets import (
     QStatusBar, QLabel, QTabWidget, QPushButton, QFileDialog,
     QMessageBox, QFileSystemModel, QDialog
 )
-from PySide6.QtCore import Qt, QDir, QUrl
-from PySide6.QtGui import QAction, QIcon, QStandardItemModel, QStandardItem
+from PySide6.QtCore import Qt, QDir, QUrl, QSize
+from PySide6.QtGui import QAction, QIcon, QStandardItemModel, QStandardItem, QFont
 import os
+import qtawesome as qta
 
 from .ui.file_browser import FileBrowser
 from .ui.archive_viewer import ArchiveViewer
@@ -36,7 +37,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("GudaZip - Python桌面压缩管理器")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(1200, 700)
         
         # 创建中央部件
         central_widget = QWidget()
@@ -44,10 +45,11 @@ class MainWindow(QMainWindow):
         
         # 创建主布局
         main_layout = QHBoxLayout(central_widget)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
         
         # 创建分割器
         splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(splitter)
         
         # 左侧文件系统导航
         self.file_browser = FileBrowser()
@@ -65,7 +67,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.tab_widget)
         
         # 设置分割器比例
-        splitter.setSizes([300, 700])
+        splitter.setSizes([300, 900])
+        
+        main_layout.addWidget(splitter)
         
         # 连接信号
         self.file_browser.fileSelected.connect(self.on_file_selected)
@@ -74,35 +78,42 @@ class MainWindow(QMainWindow):
         """设置动作"""
         # 新建压缩包
         self.action_new_archive = QAction("新建压缩包", self)
+        self.action_new_archive.setIcon(qta.icon('fa5s.file-archive', color='#2e7d32'))
         self.action_new_archive.setShortcut("Ctrl+N")
         self.action_new_archive.triggered.connect(self.new_archive)
         
         # 打开压缩包
         self.action_open_archive = QAction("打开压缩包", self)
+        self.action_open_archive.setIcon(qta.icon('fa5s.folder-open', color='#f57c00'))
         self.action_open_archive.setShortcut("Ctrl+O")
         self.action_open_archive.triggered.connect(self.open_archive)
         
         # 解压到文件夹
         self.action_extract = QAction("解压到...", self)
+        self.action_extract.setIcon(qta.icon('fa5s.file-export', color='#1976d2'))
         self.action_extract.setShortcut("Ctrl+E")
         self.action_extract.triggered.connect(self.extract_archive)
         
         # 添加文件
         self.action_add_files = QAction("添加文件", self)
+        self.action_add_files.setIcon(qta.icon('fa5s.plus-circle', color='#388e3c'))
         self.action_add_files.setShortcut("Ctrl+A")
         self.action_add_files.triggered.connect(self.add_files)
         
         # 测试压缩包
         self.action_test = QAction("测试压缩包", self)
+        self.action_test.setIcon(qta.icon('fa5s.check-circle', color='#7b1fa2'))
         self.action_test.setShortcut("Ctrl+T")
         self.action_test.triggered.connect(self.test_archive)
         
         # 设置
         self.action_settings = QAction("设置", self)
+        self.action_settings.setIcon(qta.icon('fa5s.cog', color='#616161'))
         self.action_settings.triggered.connect(self.show_settings)
         
         # 关于
         self.action_about = QAction("关于", self)
+        self.action_about.setIcon(qta.icon('fa5s.info-circle', color='#1976d2'))
         self.action_about.triggered.connect(self.show_about)
         
     def setup_menus(self):
@@ -132,6 +143,42 @@ class MainWindow(QMainWindow):
     def setup_toolbar(self):
         """设置工具栏"""
         toolbar = self.addToolBar("主工具栏")
+        toolbar.setIconSize(QSize(24, 24))
+        toolbar.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        
+        # 设置工具栏样式
+        toolbar.setStyleSheet("""
+        QToolBar {
+            background-color: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            spacing: 3px;
+            padding: 5px;
+        }
+        QToolButton {
+            background-color: transparent;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: 5px;
+            margin: 2px;
+            min-width: 60px;
+        }
+        QToolButton:hover {
+            background-color: #e3f2fd;
+            border-color: #90caf9;
+        }
+        QToolButton:pressed {
+            background-color: #bbdefb;
+            border-color: #64b5f6;
+        }
+        QToolBar::separator {
+            background-color: #d0d0d0;
+            width: 1px;
+            margin: 5px;
+        }
+        """)
+        
+        # 添加动作到工具栏
         toolbar.addAction(self.action_new_archive)
         toolbar.addAction(self.action_open_archive)
         toolbar.addSeparator()
