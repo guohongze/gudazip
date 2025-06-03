@@ -17,6 +17,7 @@ import os
 from .ui.file_browser import FileBrowser
 from .ui.archive_viewer import ArchiveViewer
 from .ui.create_archive_dialog import CreateArchiveDialog
+from .ui.extract_archive_dialog import ExtractArchiveDialog
 from .core.archive_manager import ArchiveManager
 
 
@@ -239,8 +240,46 @@ class MainWindow(QMainWindow):
             
     def extract_archive(self):
         """解压压缩包"""
-        # TODO: 实现解压功能
-        QMessageBox.information(self, "提示", "解压功能开发中...")
+        # 获取当前选择的压缩包路径
+        current_path = self.file_browser.get_current_path()
+        
+        # 如果没有选择文件，或选择的不是压缩包，使用文件对话框选择
+        if not current_path or not self.archive_manager.is_archive_file(current_path):
+            current_path, _ = QFileDialog.getOpenFileName(
+                self, "选择要解压的压缩包", "",
+                "压缩包文件 (*.zip *.rar *.7z *.tar *.gz *.bz2);;所有文件 (*.*)"
+            )
+            
+        if not current_path:
+            return
+            
+        # 检查文件是否存在
+        if not os.path.exists(current_path):
+            QMessageBox.warning(self, "警告", f"文件不存在：{current_path}")
+            return
+            
+        # 检查是否为支持的压缩包格式
+        if not self.archive_manager.is_archive_file(current_path):
+            QMessageBox.warning(self, "警告", f"不支持的文件格式：{current_path}")
+            return
+            
+        try:
+            # 创建并显示解压对话框
+            dialog = ExtractArchiveDialog(self.archive_manager, current_path, self)
+            
+            # 显示对话框
+            if dialog.exec() == QDialog.Accepted:
+                # 解压完成，更新状态
+                self.path_label.setText("解压完成")
+                
+                # 可选：在文件浏览器中显示解压后的文件夹
+                extract_path = dialog.target_edit.text()
+                if os.path.exists(extract_path):
+                    # 可以在这里添加打开文件夹的功能
+                    pass
+                    
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"无法打开解压对话框：{str(e)}")
         
     def add_files(self):
         """添加文件到压缩包"""
