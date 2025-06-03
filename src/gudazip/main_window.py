@@ -16,7 +16,6 @@ import os
 import qtawesome as qta
 
 from .ui.file_browser import FileBrowser
-from .ui.archive_viewer import ArchiveViewer
 from .ui.create_archive_dialog import CreateArchiveDialog
 from .ui.extract_archive_dialog import ExtractArchiveDialog
 from .core.archive_manager import ArchiveManager
@@ -44,32 +43,13 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         # 创建主布局
-        main_layout = QHBoxLayout(central_widget)
+        main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(10, 10, 10, 10)
         
-        # 创建分割器
-        splitter = QSplitter(Qt.Horizontal)
-        
-        # 左侧文件系统导航
+        # 只使用左侧文件系统导航，占据整个空间
         self.file_browser = FileBrowser()
-        splitter.addWidget(self.file_browser)
-        
-        # 右侧文件列表/压缩包内容查看器
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setTabsClosable(True)
-        self.tab_widget.tabCloseRequested.connect(self.close_tab)
-        
-        # 添加默认的文件浏览标签
-        self.archive_viewer = ArchiveViewer()
-        self.tab_widget.addTab(self.archive_viewer, "文件浏览")
-        
-        splitter.addWidget(self.tab_widget)
-        
-        # 设置分割器比例
-        splitter.setSizes([300, 900])
-        
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self.file_browser)
         
         # 连接信号
         self.file_browser.fileSelected.connect(self.on_file_selected)
@@ -204,7 +184,8 @@ class MainWindow(QMainWindow):
     def on_file_selected(self, file_path):
         """文件选择事件处理"""
         if self.archive_manager.is_archive_file(file_path):
-            self.open_archive_file(file_path)
+            # 压缩包文件，显示信息或执行操作
+            self.path_label.setText(f"压缩包：{file_path}")
         else:
             self.path_label.setText(f"当前：{file_path}")
             
@@ -219,33 +200,6 @@ class MainWindow(QMainWindow):
         else:
             self.path_label.setText("就绪")
         
-    def open_archive_file(self, file_path):
-        """打开压缩包文件"""
-        try:
-            # 检查是否已经打开
-            for i in range(self.tab_widget.count()):
-                if self.tab_widget.tabText(i) == file_path:
-                    self.tab_widget.setCurrentIndex(i)
-                    return
-                    
-            # 创建新的压缩包查看器
-            archive_viewer = ArchiveViewer(file_path)
-            archive_info = self.archive_manager.get_archive_info(file_path)
-            
-            if archive_info:
-                archive_viewer.load_archive(archive_info)
-                tab_name = os.path.basename(file_path)  # 只显示文件名
-                self.tab_widget.addTab(archive_viewer, tab_name)
-                self.tab_widget.setCurrentWidget(archive_viewer)
-                
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"无法打开压缩包：{str(e)}")
-            
-    def close_tab(self, index):
-        """关闭标签页"""
-        if index > 0:  # 不允许关闭第一个标签（文件浏览）
-            self.tab_widget.removeTab(index)
-            
     def new_archive(self):
         """新建压缩包"""
         # 获取当前选择的文件路径
@@ -323,13 +277,7 @@ class MainWindow(QMainWindow):
         # 显示对话框
         if dialog.exec() == QDialog.Accepted:
             # 对话框中已经处理了创建过程
-            # 这里可以添加后续处理，比如刷新界面等
             self.path_label.setText("压缩包创建完成")
-            
-            # 可选：打开刚创建的压缩包
-            archive_path = dialog.path_edit.text()
-            if os.path.exists(archive_path):
-                self.open_archive_file(archive_path)
             
     def open_archive(self):
         """打开压缩包"""
@@ -338,7 +286,8 @@ class MainWindow(QMainWindow):
             "压缩包文件 (*.zip *.rar *.7z *.tar *.gz *.bz2);;所有文件 (*.*)"
         )
         if file_path:
-            self.open_archive_file(file_path)
+            # 可以在这里添加压缩包查看功能
+            QMessageBox.information(self, "压缩包", f"已选择压缩包：{file_path}")
             
     def extract_archive(self):
         """解压压缩包"""

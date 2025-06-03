@@ -4,8 +4,12 @@
 实现左侧的文件系统树状导航
 """
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeView, QHeaderView, QFileSystemModel
-from PySide6.QtCore import Qt, QDir, Signal, QModelIndex
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QTreeView, QHeaderView, 
+    QFileSystemModel, QComboBox, QLabel, QPushButton
+)
+from PySide6.QtCore import Qt, QDir, Signal, QModelIndex, QStandardPaths
+import os
 
 
 class FileBrowser(QWidget):
@@ -25,22 +29,67 @@ class FileBrowser(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # 创建文件系统模型
+        # 先创建文件系统模型
         self.file_model = QFileSystemModel()
-        self.file_model.setRootPath(QDir.rootPath())
         
         # 设置文件过滤器，显示所有文件和文件夹
         self.file_model.setFilter(
             QDir.AllDirs | QDir.Files | QDir.NoDotAndDotDot
         )
         
+        # 创建路径选择区域
+        path_layout = QHBoxLayout()
+        
+        # 路径标签
+        path_label = QLabel("位置:")
+        path_layout.addWidget(path_label)
+        
+        # 路径下拉选择框
+        self.path_combo = QComboBox()
+        self.path_combo.setEditable(True)
+        
+        # 添加常用路径
+        desktop_path = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
+        documents_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+        downloads_path = QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
+        home_path = QStandardPaths.writableLocation(QStandardPaths.HomeLocation)
+        
+        # 添加路径到下拉框
+        common_paths = [
+            ("桌面", desktop_path),
+            ("我的文档", documents_path),
+            ("下载", downloads_path),
+            ("用户目录", home_path),
+            ("C盘", "C:\\"),
+            ("D盘", "D:\\"),
+            ("E盘", "E:\\"),
+        ]
+        
+        for name, path in common_paths:
+            if os.path.exists(path):
+                self.path_combo.addItem(f"{name} ({path})", path)
+        
+        # 现在连接信号（在模型创建之后）
+        self.path_combo.currentTextChanged.connect(self.on_path_changed)
+        
+        path_layout.addWidget(self.path_combo)
+        
+        # 刷新按钮
+        refresh_button = QPushButton("刷新")
+        refresh_button.clicked.connect(self.refresh_view)
+        path_layout.addWidget(refresh_button)
+        
+        layout.addLayout(path_layout)
+        
         # 创建树视图
         self.tree_view = QTreeView()
         self.tree_view.setModel(self.file_model)
         
-        # 设置根路径
-        root_index = self.file_model.index(QDir.rootPath())
-        self.tree_view.setRootIndex(root_index)
+        # 设置多选模式
+        self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
+        
+        # 设置默认路径为桌面
+        self.set_root_path(desktop_path)
         
         # 隐藏除名称外的其他列
         for i in range(1, self.file_model.columnCount()):
@@ -50,9 +99,6 @@ class FileBrowser(QWidget):
         header = self.tree_view.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         
-        # 设置多选模式
-        self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
-        
         # 连接信号
         self.tree_view.clicked.connect(self.on_item_clicked)
         self.tree_view.doubleClicked.connect(self.on_item_double_clicked)
@@ -60,6 +106,43 @@ class FileBrowser(QWidget):
         self.tree_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
         
         layout.addWidget(self.tree_view)
+        
+    def set_root_path(self, path):
+        """设置根路径"""
+        if os.path.exists(path):
+            self.file_model.setRootPath(path)
+            root_index = self.file_model.index(path)
+            self.tree_view.setRootIndex(root_index)
+            
+            # 更新下拉框显示
+            for i in range(self.path_combo.count()):
+                if self.path_combo.itemData(i) == path:
+                    self.path_combo.setCurrentIndex(i)
+                    break
+            else:
+                # 如果路径不在预设列表中，添加到下拉框
+                self.path_combo.setCurrentText(path)
+                
+    def on_path_changed(self, path_text):
+        """路径改变事件"""
+        # 从下拉框文本中提取路径
+        if "(" in path_text and ")" in path_text:
+            # 格式：名称 (路径)
+            start = path_text.find("(") + 1
+            end = path_text.find(")")
+            path = path_text[start:end]
+        else:
+            # 直接输入的路径
+            path = path_text
+            
+        if os.path.exists(path):
+            self.set_root_path(path)
+            
+    def refresh_view(self):
+        """刷新视图"""
+        current_path = self.file_model.rootPath()
+        self.file_model.setRootPath("")
+        self.file_model.setRootPath(current_path)
         
     def on_item_clicked(self, index: QModelIndex):
         """处理单击事件"""
