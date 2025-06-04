@@ -942,6 +942,7 @@ class FileBrowser(QWidget):
             # 压缩包内文件/文件夹的右键菜单
             item_type = index.data(Qt.UserRole)
             file_path = index.data(Qt.UserRole + 1)
+            item_name = index.data(Qt.DisplayRole)
             
             if item_type == 'file':
                 # 文件右键菜单
@@ -952,11 +953,37 @@ class FileBrowser(QWidget):
                 
                 menu.addSeparator()
                 
-                # 解压到... (暂时简化为解压到临时目录)
+                # 复制
+                copy_action = QAction("复制", self)
+                copy_action.setIcon(qta.icon('fa5s.copy', color='#2196f3'))
+                copy_action.triggered.connect(lambda: self.copy_archive_items([file_path]))
+                menu.addAction(copy_action)
+                
+                # 重命名
+                rename_action = QAction("重命名", self)
+                rename_action.setIcon(qta.icon('fa5s.edit', color='#ff9800'))
+                rename_action.triggered.connect(lambda: self.rename_archive_file(file_path, item_name))
+                menu.addAction(rename_action)
+                
+                # 删除
+                delete_action = QAction("删除", self)
+                delete_action.setIcon(qta.icon('fa5s.trash', color='#f44336'))
+                delete_action.triggered.connect(lambda: self.delete_archive_file(file_path))
+                menu.addAction(delete_action)
+                
+                menu.addSeparator()
+                
+                # 解压到临时目录
                 extract_action = QAction("解压到临时目录", self)
                 extract_action.setIcon(qta.icon('fa5s.download', color='#4caf50'))
                 extract_action.triggered.connect(lambda: self.extract_archive_file(file_path))
                 menu.addAction(extract_action)
+                
+                # 打开当前文件夹
+                open_folder_action = QAction("打开当前文件夹", self)
+                open_folder_action.setIcon(qta.icon('fa5s.external-link-alt', color='#2196f3'))
+                open_folder_action.triggered.connect(self.open_archive_folder_in_explorer)
+                menu.addAction(open_folder_action)
                 
             elif item_type == 'folder':
                 # 文件夹右键菜单
@@ -964,8 +991,72 @@ class FileBrowser(QWidget):
                 open_action.setIcon(qta.icon('fa5s.folder-open', color='#f57c00'))
                 open_action.triggered.connect(lambda: self.navigate_archive_directory(file_path))
                 menu.addAction(open_action)
+                
+                menu.addSeparator()
+                
+                # 复制
+                copy_action = QAction("复制", self)
+                copy_action.setIcon(qta.icon('fa5s.copy', color='#2196f3'))
+                copy_action.triggered.connect(lambda: self.copy_archive_items([file_path]))
+                menu.addAction(copy_action)
+                
+                # 重命名
+                rename_action = QAction("重命名", self)
+                rename_action.setIcon(qta.icon('fa5s.edit', color='#ff9800'))
+                rename_action.triggered.connect(lambda: self.rename_archive_file(file_path, item_name))
+                menu.addAction(rename_action)
+                
+                # 删除
+                delete_action = QAction("删除", self)
+                delete_action.setIcon(qta.icon('fa5s.trash', color='#f44336'))
+                delete_action.triggered.connect(lambda: self.delete_archive_file(file_path))
+                menu.addAction(delete_action)
+                
+                menu.addSeparator()
+                
+                # 新建文件夹
+                new_folder_action = QAction("新建文件夹", self)
+                new_folder_action.setIcon(qta.icon('fa5s.folder', color='#4caf50'))
+                new_folder_action.triggered.connect(lambda: self.create_archive_folder(file_path))
+                menu.addAction(new_folder_action)
+                
+                # 打开当前文件夹
+                open_folder_action = QAction("打开当前文件夹", self)
+                open_folder_action.setIcon(qta.icon('fa5s.external-link-alt', color='#2196f3'))
+                open_folder_action.triggered.connect(self.open_archive_folder_in_explorer)
+                menu.addAction(open_folder_action)
         else:
             # 压缩包内空白处右键菜单
+            # 粘贴（如果有剪贴板内容）
+            if hasattr(self, 'archive_clipboard_items') and self.archive_clipboard_items:
+                paste_action = QAction("粘贴", self)
+                paste_action.setIcon(qta.icon('fa5s.paste', color='#4caf50'))
+                paste_action.triggered.connect(self.paste_to_archive)
+                menu.addAction(paste_action)
+                menu.addSeparator()
+            
+            # 如果有系统剪贴板文件，可以粘贴到压缩包
+            if self.clipboard_items:
+                paste_files_action = QAction("粘贴文件到压缩包", self)
+                paste_files_action.setIcon(qta.icon('fa5s.file-import', color='#4caf50'))
+                paste_files_action.triggered.connect(self.paste_files_to_archive)
+                menu.addAction(paste_files_action)
+                menu.addSeparator()
+            
+            # 创建文件夹
+            new_folder_action = QAction("新建文件夹", self)
+            new_folder_action.setIcon(qta.icon('fa5s.folder', color='#4caf50'))
+            new_folder_action.triggered.connect(lambda: self.create_archive_folder())
+            menu.addAction(new_folder_action)
+            
+            # 打开当前文件夹
+            open_folder_action = QAction("打开当前文件夹", self)
+            open_folder_action.setIcon(qta.icon('fa5s.external-link-alt', color='#2196f3'))
+            open_folder_action.triggered.connect(self.open_archive_folder_in_explorer)
+            menu.addAction(open_folder_action)
+            
+            menu.addSeparator()
+            
             # 返回上级目录或退出压缩包
             if self.archive_current_dir:
                 up_action = QAction("返回上级目录", self)
@@ -977,7 +1068,7 @@ class FileBrowser(QWidget):
             exit_action.setIcon(qta.icon('fa5s.times', color='#f44336'))
             exit_action.triggered.connect(self._exit_archive_mode)
             menu.addAction(exit_action)
-    
+
     def _show_filesystem_context_menu(self, index, menu):
         """显示文件系统模式的上下文菜单"""
         # 获取当前所有选中的文件路径
@@ -1739,3 +1830,118 @@ class FileBrowser(QWidget):
             parent_widget = parent_widget.parent()
         # 如果找不到主窗口，直接退出压缩包模式
         self.exit_archive_mode() 
+
+    def copy_archive_items(self, file_paths):
+        """复制压缩包内的文件到剪贴板"""
+        if not hasattr(self, 'archive_clipboard_items'):
+            self.archive_clipboard_items = []
+        self.archive_clipboard_items = file_paths.copy()
+        print(f"📋 已复制压缩包内文件: {file_paths}")
+    
+    def rename_archive_file(self, file_path, current_name):
+        """重命名压缩包内的文件或文件夹"""
+        new_name, ok = QInputDialog.getText(
+            self, "重命名", 
+            f"请输入新名称:", 
+            text=current_name
+        )
+        
+        if ok and new_name and new_name != current_name:
+            if not new_name.strip():
+                QMessageBox.warning(self, "错误", "名称不能为空")
+                return
+            
+            # 显示提示信息（压缩包修改需要重新创建）
+            QMessageBox.information(
+                self, "功能提示", 
+                "重命名压缩包内文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
+            )
+    
+    def delete_archive_file(self, file_path):
+        """删除压缩包内的文件"""
+        reply = QMessageBox.question(
+            self, "确认删除", 
+            f"确定要从压缩包中删除 '{os.path.basename(file_path)}' 吗？\n注意：这需要重新创建压缩包。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # 显示提示信息（压缩包修改需要重新创建）
+            QMessageBox.information(
+                self, "功能提示", 
+                "从压缩包中删除文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
+            )
+    
+    def create_archive_folder(self, parent_path=None):
+        """在压缩包中创建新文件夹"""
+        folder_name, ok = QInputDialog.getText(
+            self, "新建文件夹", 
+            "请输入文件夹名称:",
+            text="新建文件夹"
+        )
+        
+        if ok and folder_name:
+            if not folder_name.strip():
+                QMessageBox.warning(self, "错误", "文件夹名称不能为空")
+                return
+            
+            # 显示提示信息（压缩包修改需要重新创建）
+            QMessageBox.information(
+                self, "功能提示", 
+                "在压缩包中创建文件夹需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
+            )
+    
+    def open_archive_folder_in_explorer(self):
+        """在资源管理器中打开当前压缩包所在文件夹"""
+        if not self.archive_path or not os.path.exists(self.archive_path):
+            QMessageBox.warning(self, "错误", "压缩包路径无效")
+            return
+        
+        archive_dir = os.path.dirname(self.archive_path)
+        try:
+            if sys.platform == "win32":
+                # Windows: 选中压缩包文件并打开资源管理器
+                subprocess.run(['explorer', '/select,', self.archive_path])
+            elif sys.platform == "darwin":  # macOS
+                subprocess.call(["open", "-R", self.archive_path])
+            else:  # Linux
+                subprocess.call(["xdg-open", archive_dir])
+        except Exception as e:
+            QMessageBox.warning(self, "打开失败", f"无法打开文件夹: {str(e)}")
+    
+    def paste_to_archive(self):
+        """粘贴压缩包内复制的文件到当前位置"""
+        if not hasattr(self, 'archive_clipboard_items') or not self.archive_clipboard_items:
+            QMessageBox.warning(self, "错误", "没有可粘贴的压缩包内容")
+            return
+        
+        QMessageBox.information(
+            self, "功能提示", 
+            "在压缩包内移动/复制文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
+        )
+    
+    def paste_files_to_archive(self):
+        """将系统剪贴板中的文件粘贴到压缩包中"""
+        if not self.clipboard_items:
+            QMessageBox.warning(self, "错误", "没有可粘贴的文件")
+            return
+        
+        # 检查文件是否存在
+        existing_files = [f for f in self.clipboard_items if os.path.exists(f)]
+        if not existing_files:
+            QMessageBox.warning(self, "错误", "剪贴板中的文件不存在")
+            return
+        
+        reply = QMessageBox.question(
+            self, "确认粘贴", 
+            f"确定要将 {len(existing_files)} 个文件添加到压缩包中吗？\n注意：这需要重新创建压缩包。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            QMessageBox.information(
+                self, "功能提示", 
+                "向压缩包中添加文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
+            )
