@@ -321,10 +321,10 @@ class FileBrowser(QWidget):
                     self.path_combo.addItem(name, path)
         
         # 现在连接信号（在模型创建之后）
-        self.path_combo.currentTextChanged.connect(self.on_path_changed)
+        self.path_combo.currentTextChanged.connect(self.handle_location_selection)
         
         # 为路径输入框添加回车键事件处理
-        self.path_combo.lineEdit().returnPressed.connect(self.on_path_entered)
+        self.path_combo.lineEdit().returnPressed.connect(self.handle_manual_path_input)
         
         toolbar_layout.addWidget(self.path_combo)
         
@@ -687,9 +687,9 @@ class FileBrowser(QWidget):
             if not path_found:
                 # 如果路径不在预设列表中，直接设置文本
                 # 临时断开信号连接，避免触发路径变化事件
-                self.path_combo.currentTextChanged.disconnect(self.on_path_changed)
+                self.path_combo.currentTextChanged.disconnect(self.handle_location_selection)
                 self.path_combo.setCurrentText(path)
-                self.path_combo.currentTextChanged.connect(self.on_path_changed)
+                self.path_combo.currentTextChanged.connect(self.handle_location_selection)
                 
             # 更新向上按钮状态
             self.update_up_button_state()
@@ -732,24 +732,28 @@ class FileBrowser(QWidget):
                 self.up_button.setEnabled(True)
                 self.up_button.setToolTip(f"上一级目录: {os.path.basename(parent_path) if parent_path else '此电脑'}")
         
-    def on_path_changed(self, path_text):
-        """路径改变事件"""
-        # 从下拉框文本中提取路径
+    def handle_location_selection(self, path_text):
+        """处理位置下拉菜单选择 - 完全独立的位置切换处理"""
+        # 强制退出压缩包模式（如果处于压缩包模式）
+        if self.archive_viewing_mode:
+            self.force_exit_archive_mode()
+            
+        # 从下拉框数据中提取真实路径
         current_data = self.path_combo.currentData()
         if current_data:
-            # 使用存储的路径数据
-            path = current_data
+            target_path = current_data
         else:
-            # 手动输入的路径
-            path = path_text
+            target_path = path_text
             
-        if path == "ThisPC":
-            self.set_root_path("ThisPC")
-        elif os.path.exists(path):
-            self.set_root_path(path)
+        # 直接切换到目标位置
+        self.force_navigate_to_path(target_path)
+    
+    def handle_manual_path_input(self):
+        """处理手动输入路径 - 完全独立的路径输入处理"""
+        # 强制退出压缩包模式（如果处于压缩包模式）
+        if self.archive_viewing_mode:
+            self.force_exit_archive_mode()
             
-    def on_path_entered(self):
-        """用户在路径输入框中按回车键"""
         path_text = self.path_combo.lineEdit().text().strip()
         if not path_text:
             return
@@ -757,17 +761,18 @@ class FileBrowser(QWidget):
         # 规范化路径
         path_text = os.path.normpath(path_text)
         
+        # 直接切换到目标位置
         if path_text == "此电脑" or path_text.lower() == "thispc":
-            self.set_root_path("ThisPC")
+            self.force_navigate_to_path("ThisPC")
         elif os.path.exists(path_text) and os.path.isdir(path_text):
-            self.set_root_path(path_text)
+            self.force_navigate_to_path(path_text)
         else:
             QMessageBox.warning(self, "路径错误", f"路径不存在或不是文件夹: {path_text}")
             # 恢复为当前路径
             current_path = self.get_current_root_path()
             if current_path:
                 self.path_combo.lineEdit().setText(current_path)
-            
+    
     def go_up_directory(self):
         """返回上一级目录"""
         if self.archive_viewing_mode:
@@ -1677,29 +1682,44 @@ class FileBrowser(QWidget):
 
     def enter_archive_mode(self, archive_path, archive_file_list):
         """进入压缩包查看模式"""
-        self.archive_viewing_mode = True
-        self.archive_path = archive_path
-        self.archive_file_list = archive_file_list
-        self.archive_current_dir = ""
-        
-        # 创建压缩包内容模型
-        self.archive_model = QStandardItemModel()
-        
-        # 设置视图使用压缩包模型
-        self.tree_view.setModel(self.archive_model)
-        self.list_view.setModel(self.archive_model)
-        
-        # 显示压缩包根目录内容
-        self.display_archive_directory_content()
-        
-        # 设置列宽
-        self.setup_tree_columns()
-        
-        # 更新向上按钮状态
-        self.update_up_button_state()
-        
-        # 更新路径显示
-        self.path_combo.lineEdit().setText(os.path.basename(archive_path))
+        try:
+            self.archive_viewing_mode = True
+            self.archive_path = archive_path
+            self.archive_file_list = archive_file_list
+            self.archive_current_dir = ""
+            
+            # 创建压缩包内容模型
+            self.archive_model = QStandardItemModel()
+            
+            # 设置视图使用压缩包模型
+            if hasattr(self, 'tree_view') and self.tree_view:
+                self.tree_view.setModel(self.archive_model)
+            if hasattr(self, 'list_view') and self.list_view:
+                self.list_view.setModel(self.archive_model)
+            
+            # 显示压缩包根目录内容
+            self.display_archive_directory_content()
+            
+            # 设置列宽
+            if hasattr(self, 'setup_tree_columns'):
+                self.setup_tree_columns()
+            
+            # 更新向上按钮状态
+            if hasattr(self, 'update_up_button_state'):
+                self.update_up_button_state()
+            
+            # 更新路径显示
+            if hasattr(self, 'path_combo') and self.path_combo:
+                # 临时断开信号，避免触发handle_location_selection
+                self.path_combo.currentTextChanged.disconnect(self.handle_location_selection)
+                self.path_combo.lineEdit().setText(os.path.basename(archive_path))
+                # 重新连接信号
+                self.path_combo.currentTextChanged.connect(self.handle_location_selection)
+            
+        except Exception as e:
+            print(f"进入压缩包模式失败: {e}")
+            import traceback
+            print(f"详细错误: {traceback.format_exc()}")
     
     def exit_archive_mode(self):
         """退出压缩包查看模式"""
@@ -2001,3 +2021,64 @@ class FileBrowser(QWidget):
                     
             except Exception as e:
                 QMessageBox.critical(self, "删除失败", f"删除操作失败：{str(e)}")
+
+    def force_exit_archive_mode(self):
+        """强制退出压缩包模式 - 独立的退出逻辑"""
+        # 重置所有压缩包相关状态
+        self.archive_viewing_mode = False
+        self.archive_path = None
+        self.archive_file_list = []
+        self.archive_current_dir = ""
+        self.archive_model = None
+        
+        # 恢复文件系统模型
+        self.tree_view.setModel(self.file_model)
+        self.list_view.setModel(self.file_model)
+        
+        # 通知主窗口也退出压缩包模式
+        parent_widget = self.parent()
+        while parent_widget:
+            if hasattr(parent_widget, 'exit_archive_mode'):
+                parent_widget.exit_archive_mode()
+                break
+            parent_widget = parent_widget.parent()
+    
+    def force_navigate_to_path(self, target_path):
+        """强制导航到指定路径 - 独立的导航逻辑"""
+        if target_path == "ThisPC":
+            # 处理"此电脑"
+            self.file_model.setRootPath("")
+            self.tree_view.setRootIndex(self.file_model.index(""))
+            self.list_view.setRootIndex(self.file_model.index(""))
+        elif os.path.exists(target_path):
+            # 处理真实路径
+            self.file_model.setRootPath(target_path)
+            root_index = self.file_model.index(target_path)
+            self.tree_view.setRootIndex(root_index)
+            self.list_view.setRootIndex(root_index)
+            
+            # 更新下拉框显示（不触发信号）
+            self.update_path_combo_display(target_path)
+        
+        # 更新向上按钮状态
+        self.update_up_button_state()
+    
+    def update_path_combo_display(self, path):
+        """更新路径下拉框显示 - 独立的显示更新逻辑"""
+        # 临时断开信号，避免递归触发
+        self.path_combo.currentTextChanged.disconnect(self.handle_location_selection)
+        
+        # 检查是否在预设列表中
+        path_found = False
+        for i in range(self.path_combo.count()):
+            if self.path_combo.itemData(i) == path:
+                self.path_combo.setCurrentIndex(i)
+                path_found = True
+                break
+        
+        if not path_found:
+            # 如果路径不在预设列表中，直接设置文本
+            self.path_combo.setCurrentText(path)
+        
+        # 重新连接信号
+        self.path_combo.currentTextChanged.connect(self.handle_location_selection)
