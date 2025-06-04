@@ -46,83 +46,7 @@ from ..core.file_operation_manager import FileOperationManager
 from ..core.archive_operation_manager import ArchiveOperationManager
 from .context_menu_manager import ContextMenuManager
 from .toolbar_widget import ToolbarWidget
-
-
-class EnhancedIconProvider(QFileIconProvider):
-    """增强的图标提供器，专门处理快捷方式和获取高质量图标"""
-    
-    def __init__(self):
-        super().__init__()
-        self._icon_cache = {}  # 图标缓存
-        
-    def _get_enhanced_icon(self, file_path):
-        """获取增强的文件图标"""
-        try:
-            # 只对快捷方式文件进行特殊处理
-            if file_path.lower().endswith('.lnk') and HAS_WIN32:
-                return self._get_shortcut_target_icon(file_path)
-            
-            # 对于所有其他文件类型，完全不干预，让系统自己处理
-            # 这里不应该调用 super().icon()，而是应该返回 None 让系统使用默认行为
-            return None
-            
-        except Exception as e:
-            print(f"获取文件图标时出错 {file_path}: {e}")
-            return None
-    
-    def icon(self, type_or_info):
-        """重写图标获取方法"""
-        if hasattr(type_or_info, 'filePath'):
-            # 处理 QFileInfo 对象
-            file_path = type_or_info.filePath()
-            
-            # 检查缓存
-            if file_path in self._icon_cache:
-                return self._icon_cache[file_path]
-            
-            # 获取增强图标
-            enhanced_icon = self._get_enhanced_icon(file_path)
-            
-            # 如果获取到了增强图标，使用它并缓存
-            if enhanced_icon and not enhanced_icon.isNull():
-                self._icon_cache[file_path] = enhanced_icon
-                return enhanced_icon
-            
-            # 否则使用系统默认行为
-            default_icon = super().icon(type_or_info)
-            self._icon_cache[file_path] = default_icon
-            return default_icon
-        else:
-            # 处理 QFileIconProvider.IconType
-            return super().icon(type_or_info)
-    
-    def _get_shortcut_target_icon(self, lnk_path):
-        """获取快捷方式目标程序的图标"""
-        if not HAS_WIN32:
-            return None
-        
-        try:
-            # 创建 Shell 对象
-            shell = win32com.client.Dispatch("WScript.Shell")
-            shortcut = shell.CreateShortCut(lnk_path)
-            target_path = shortcut.Targetpath
-            
-            # 如果目标路径存在，使用临时QFileSystemModel获取其图标
-            if target_path and os.path.exists(target_path):
-                from PySide6.QtWidgets import QFileSystemModel
-                temp_model = QFileSystemModel()
-                index = temp_model.index(target_path)
-                if index.isValid():
-                    icon = temp_model.fileIcon(index)
-                    if not icon.isNull():
-                        return icon
-            
-            # 如果无法获取目标，返回None让系统使用默认图标
-            return None
-            
-        except Exception as e:
-            print(f"获取快捷方式图标时出错 {lnk_path}: {e}")
-            return None
+from .file_view_widget import FileViewWidget
 
 
 class FileBrowser(QWidget):
@@ -203,10 +127,6 @@ class FileBrowser(QWidget):
             QDir.AllDirs | QDir.Files | QDir.NoDotAndDotDot
         )
         
-        # 设置增强的图标提供器，确保显示高质量图标
-        enhanced_icon_provider = EnhancedIconProvider()
-        self.file_model.setIconProvider(enhanced_icon_provider)
-        
         # 创建工具栏组件
         self.toolbar = ToolbarWidget(self)
         
@@ -220,249 +140,41 @@ class FileBrowser(QWidget):
         
         layout.addWidget(self.toolbar)
         
-        # 创建树视图（详细信息视图）
-        self.tree_view = QTreeView()
-        self.tree_view.setModel(self.file_model)
+        # 创建文件视图组件
+        self.file_view = FileViewWidget(self)
         
-        # 设置多选模式
-        self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
+        # 设置文件系统模型到视图组件
+        self.file_view.set_file_model(self.file_model)
         
-        # 强制设置上下文菜单策略，确保使用我们的自定义菜单
-        self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.tree_view.customContextMenuRequested.connect(self.show_context_menu)
+        # 连接文件视图信号到现有的处理方法
+        self.file_view.item_clicked.connect(self.on_item_clicked)
+        self.file_view.item_double_clicked.connect(self.on_item_double_clicked)
+        self.file_view.selection_changed.connect(self.on_selection_changed)
+        self.file_view.context_menu_requested.connect(self._on_view_context_menu)
         
-        # 创建列表视图（图标视图）
-        self.list_view = QListView()
-        self.list_view.setModel(self.file_model)
-        self.list_view.setViewMode(QListView.IconMode)
-        self.list_view.setResizeMode(QListView.Adjust)
-        self.list_view.setSelectionMode(QListView.ExtendedSelection)
-        self.list_view.setUniformItemSizes(True)
-        
-        # 设置Windows风格的大图标模式
-        self.list_view.setFlow(QListView.LeftToRight)  # 从左到右流式布局
-        self.list_view.setWrapping(True)  # 启用换行
-        self.list_view.setSpacing(8)  # 设置项目间距
-        
-        # 设置图标和网格大小 - 模仿Windows大图标模式
-        icon_size = 48  # Windows大图标通常是48x48
-        grid_size = 80  # 给图标和文字留足够空间
-        
-        self.list_view.setIconSize(QSize(icon_size, icon_size))
-        self.list_view.setGridSize(QSize(grid_size, grid_size))
-        
-        # 设置移动和拖拽
-        self.list_view.setMovement(QListView.Static)  # 静态排列，不允许拖拽重排
-        
-        # 强制设置列表视图的上下文菜单策略
-        self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.list_view.customContextMenuRequested.connect(self.show_list_context_menu)
-        
-        # 为视图添加样式
-        self._apply_view_styles()
+        layout.addWidget(self.file_view)
         
         # 设置默认路径为桌面
         desktop_path = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
         self.set_root_path(desktop_path)
         
-        # 设置树视图的列显示
-        self.setup_tree_columns()
-        
         # 初始化向上按钮状态
         self.update_up_button_state()
         
-        # 连接信号
-        self.tree_view.clicked.connect(self.on_item_clicked)
-        self.tree_view.doubleClicked.connect(self.on_item_double_clicked)
-        self.tree_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
-        
-        self.list_view.clicked.connect(self.on_item_clicked)
-        self.list_view.doubleClicked.connect(self.on_item_double_clicked)
-        self.list_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
-        
-        # 默认显示详细信息视图
-        layout.addWidget(self.tree_view)
-        self.current_view = self.tree_view
-        self.list_view.hide()
-
-    def _apply_view_styles(self):
-        """应用视图样式"""
-        # 为树视图添加样式
-        self.tree_view.setStyleSheet("""
-            QTreeView {
-                border: 2px solid #e0e0e0;
-                border-radius: 8px;
-                background-color: white;
-                selection-background-color: #e3f2fd;
-                selection-color: #1976d2;
-                outline: none;
-                font-size: 12px;
-                padding: 5px;
-            }
-            QTreeView::item {
-                padding: 4px;
-                border: none;
-                min-height: 20px;
-            }
-            QTreeView::item:hover {
-                background-color: #f5f5f5;
-                border-radius: 4px;
-            }
-            QTreeView::item:selected {
-                background-color: #e3f2fd;
-                border-radius: 4px;
-            }
-            QTreeView::item:selected:active {
-                background-color: #bbdefb;
-            }
-            QTreeView::branch {
-                background-color: transparent;
-            }
-            QTreeView::branch:has-siblings:!adjoins-item {
-                border-image: none;
-                border: none;
-            }
-            QTreeView::branch:has-siblings:adjoins-item {
-                border-image: none;
-                border: none;
-            }
-            QTreeView::branch:!has-children:!has-siblings:adjoins-item {
-                border-image: none;
-                border: none;
-            }
-            QTreeView::branch:closed:has-children:has-siblings {
-                border-image: none;
-                border: none;
-            }
-            QTreeView::branch:has-children:!has-siblings:closed {
-                border-image: none;
-                border: none;
-            }
-            QTreeView::branch:open:has-children:has-siblings {
-                border-image: none;
-                border: none;
-            }
-            QTreeView::branch:open:has-children:!has-siblings {
-                border-image: none;
-                border: none;
-            }
-            QHeaderView::section {
-                background-color: #f8f9fa;
-                padding: 8px;
-                border: 1px solid #e0e0e0;
-                border-radius: 4px;
-                font-weight: bold;
-                color: #333;
-            }
-        """)
-        
-        # 为列表视图添加样式
-        self.list_view.setStyleSheet("""
-            QListView {
-                border: 2px solid #e0e0e0;
-                border-radius: 8px;
-                background-color: white;
-                selection-background-color: #e3f2fd;
-                selection-color: #1976d2;
-                outline: none;
-                font-size: 11px;
-                padding: 10px;
-                show-decoration-selected: 1;
-            }
-            QListView::item {
-                border: 1px solid transparent;
-                border-radius: 6px;
-                padding: 4px;
-                margin: 2px;
-                text-align: center;
-                min-width: 70px;
-                max-width: 70px;
-            }
-            QListView::item:hover {
-                background-color: rgba(0, 120, 215, 0.1);
-                border-color: rgba(0, 120, 215, 0.3);
-            }
-            QListView::item:selected {
-                background-color: rgba(0, 120, 215, 0.15);
-                border-color: #0078d4;
-                color: black;
-            }
-            QListView::item:selected:active {
-                background-color: rgba(0, 120, 215, 0.25);
-                border-color: #005a9e;
-            }
-            QListView::item:focus {
-                border-color: #0078d4;
-                outline: none;
-            }
-        """)
-        
-    def setup_tree_columns(self):
-        """设置树视图的列"""
-        # 显示所有列：名称、修改日期、类型、大小
-        header = self.tree_view.header()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)  # 名称列自适应
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # 大小列
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # 类型列  
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # 修改日期列
-        
-        # 设置列宽
-        self.tree_view.setColumnWidth(1, 100)  # 大小
-        self.tree_view.setColumnWidth(2, 100)  # 类型
-        self.tree_view.setColumnWidth(3, 150)  # 修改日期
+    def _on_view_context_menu(self, index, global_position):
+        """处理文件视图的右键菜单请求"""
+        self.context_menu_manager.show_context_menu(index, global_position)
         
     def toggle_view_mode(self):
         """切换视图模式"""
-        if self.current_view_mode == "详细信息":
-            # 切换到图标视图
-            self.tree_view.hide()
-            
-            # 移除树视图，添加列表视图
-            layout = self.layout()
-            layout.removeWidget(self.tree_view)
-            layout.addWidget(self.list_view)
-            self.list_view.show()
-            
-            self.current_view = self.list_view
-            self.current_view_mode = "图标"
-            # 更新工具栏按钮显示
-            self.toolbar.update_view_mode("图标")
-        else:
-            # 切换到详细信息视图
-            self.list_view.hide()
-            
-            # 移除列表视图，添加树视图
-            layout = self.layout()
-            layout.removeWidget(self.list_view)
-            layout.addWidget(self.tree_view)
-            self.tree_view.show()
-            
-            self.current_view = self.tree_view
-            self.current_view_mode = "详细信息"
-            # 更新工具栏按钮显示
-            self.toolbar.update_view_mode("详细信息")
+        # 委托给FileViewWidget处理视图切换
+        new_mode = self.file_view.toggle_view_mode()
         
-        # 设置图标视图显示
-        self.setup_icon_view()
+        # 更新当前视图模式记录
+        self.current_view_mode = new_mode
         
-    def setup_icon_view(self):
-        """设置图标视图的显示参数"""
-        # 根据当前视图调整显示
-        if self.current_view == self.list_view:
-            # 确保列表视图显示图标
-            self.list_view.setModelColumn(0)  # 显示第一列（文件名+图标）
-            
-            # 刷新视图
-            current_index = self.list_view.rootIndex()
-            if current_index.isValid():
-                self.list_view.setRootIndex(current_index)
-            
-            # 强制更新视图
-            self.list_view.viewport().update()
-            
-            # 确保项目正确对齐
-            self.list_view.setLayoutMode(QListView.Batched)
-            self.list_view.setBatchSize(100)
+        # 更新工具栏按钮显示
+        self.toolbar.update_view_mode(new_mode)
         
     def set_root_path(self, path):
         """设置根路径"""
@@ -473,8 +185,7 @@ class FileBrowser(QWidget):
         if path == "ThisPC":
             # 处理"此电脑"
             self.file_model.setRootPath("")
-            self.tree_view.setRootIndex(self.file_model.index(""))
-            self.list_view.setRootIndex(self.file_model.index(""))
+            self.file_view.set_root_index(self.file_model.index(""))
             # 更新向上按钮状态
             self.update_up_button_state()
             return
@@ -482,8 +193,7 @@ class FileBrowser(QWidget):
         if os.path.exists(path):
             self.file_model.setRootPath(path)
             root_index = self.file_model.index(path)
-            self.tree_view.setRootIndex(root_index)
-            self.list_view.setRootIndex(root_index)
+            self.file_view.set_root_index(root_index)
             
             # 更新下拉框显示 - 使用ToolbarWidget的接口
             # 首先检查是否在预设列表中
@@ -704,14 +414,14 @@ class FileBrowser(QWidget):
             
     def get_current_path(self):
         """获取当前选中的路径"""
-        current_index = self.current_view.currentIndex()
+        current_index = self.file_view.get_current_index()
         if current_index.isValid():
             return self.file_model.filePath(current_index)
         return ""
         
     def get_selected_paths(self):
         """获取所有选中的路径"""
-        selected_indexes = self.current_view.selectionModel().selectedIndexes()
+        selected_indexes = self.file_view.get_selected_indexes()
         paths = []
         for index in selected_indexes:
             if index.column() == 0:  # 只处理第一列（文件名列）
@@ -724,25 +434,7 @@ class FileBrowser(QWidget):
         """设置当前选中的路径"""
         index = self.file_model.index(path)
         if index.isValid():
-            self.current_view.setCurrentIndex(index)
-            self.current_view.scrollTo(index) 
-
-    def show_context_menu(self, position):
-        """显示树视图上下文菜单"""
-        print(f"🖱️ 树视图右键菜单触发 - 位置: {position}")
-        index = self.tree_view.indexAt(position)
-        self._show_context_menu(index, self.tree_view.mapToGlobal(position))
-        
-    def show_list_context_menu(self, position):
-        """显示列表视图上下文菜单"""
-        print(f"🖱️ 列表视图右键菜单触发 - 位置: {position}")
-        index = self.list_view.indexAt(position)
-        self._show_context_menu(index, self.list_view.mapToGlobal(position))
-        
-    def _show_context_menu(self, index, global_position):
-        """显示上下文菜单的通用方法 - 已被ContextMenuManager替代"""
-        # 将调用委托给ContextMenuManager
-        self.context_menu_manager.show_context_menu(index, global_position)
+            self.file_view.set_current_index(index)
 
     def open_file(self, file_path):
         """打开文件"""
@@ -879,30 +571,21 @@ class FileBrowser(QWidget):
             self.archive_model = QStandardItemModel()
             
             # 设置视图使用压缩包模型
-            if hasattr(self, 'tree_view') and self.tree_view:
-                self.tree_view.setModel(self.archive_model)
-            if hasattr(self, 'list_view') and self.list_view:
-                self.list_view.setModel(self.archive_model)
+            self.file_view.set_archive_model(self.archive_model)
             
             # 显示压缩包根目录内容
             self.display_archive_directory_content()
             
-            # 设置列宽
-            if hasattr(self, 'setup_tree_columns'):
-                self.setup_tree_columns()
-            
             # 更新向上按钮状态
-            if hasattr(self, 'update_up_button_state'):
-                self.update_up_button_state()
+            self.update_up_button_state()
             
             # 更新路径显示 - 使用ToolbarWidget的接口
-            if hasattr(self, 'toolbar') and self.toolbar:
-                # 使用信号管理器安全地更新路径，避免触发handle_location_selection
-                self.toolbar.update_path_display(
-                    os.path.basename(archive_path),
-                    use_signal_manager=self.signal_manager,
-                    block_context="archive_path_update"
-                )
+            # 使用信号管理器安全地更新路径，避免触发handle_location_selection
+            self.toolbar.update_path_display(
+                os.path.basename(archive_path),
+                use_signal_manager=self.signal_manager,
+                block_context="archive_path_update"
+            )
             
         except Exception as e:
             print(f"进入压缩包模式失败: {e}")
@@ -918,11 +601,10 @@ class FileBrowser(QWidget):
         self.archive_model = None
         
         # 恢复文件系统模型
-        self.tree_view.setModel(self.file_model)
-        self.list_view.setModel(self.file_model)
+        self.file_view.set_file_model(self.file_model)
         
         # 更新向上按钮状态
-        self.update_up_button_state() 
+        self.update_up_button_state()
 
     def paste_to_archive(self):
         """粘贴压缩包内复制的文件到当前位置"""
@@ -970,8 +652,7 @@ class FileBrowser(QWidget):
         self.archive_model = None
         
         # 恢复文件系统模型
-        self.tree_view.setModel(self.file_model)
-        self.list_view.setModel(self.file_model)
+        self.file_view.set_file_model(self.file_model)
         
         # 通知主窗口也退出压缩包模式
         parent_widget = self.parent()
@@ -986,14 +667,12 @@ class FileBrowser(QWidget):
         if target_path == "ThisPC":
             # 处理"此电脑"
             self.file_model.setRootPath("")
-            self.tree_view.setRootIndex(self.file_model.index(""))
-            self.list_view.setRootIndex(self.file_model.index(""))
+            self.file_view.set_root_index(self.file_model.index(""))
         elif os.path.exists(target_path):
             # 处理真实路径
             self.file_model.setRootPath(target_path)
             root_index = self.file_model.index(target_path)
-            self.tree_view.setRootIndex(root_index)
-            self.list_view.setRootIndex(root_index)
+            self.file_view.set_root_index(root_index)
             
             # 更新下拉框显示（不触发信号）
             self.update_path_combo_display(target_path)
@@ -1020,15 +699,10 @@ class FileBrowser(QWidget):
             
             # 刷新根索引
             root_index = self.file_model.index(current_path)
-            self.tree_view.setRootIndex(root_index)
-            self.list_view.setRootIndex(root_index)
+            self.file_view.set_root_index(root_index)
             
             # 强制更新视图
-            self.tree_view.viewport().update()
-            self.list_view.viewport().update()
-            
-            # 重置排序以触发刷新
-            self.tree_view.header().setSortIndicator(0, Qt.AscendingOrder)
+            self.file_view.refresh_view()
             
             print(f"已刷新视图: {current_path}")  # 调试信息
 
