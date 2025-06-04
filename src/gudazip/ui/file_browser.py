@@ -46,6 +46,7 @@ from ..core.file_operation_manager import FileOperationManager
 from ..core.archive_operation_manager import ArchiveOperationManager
 from ..core.error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
 from ..core.state_manager import StateManager, StateScope, StatePersistenceType, get_state_manager
+from ..core.config_manager import ConfigManager, get_config_manager
 from .context_menu_manager import ContextMenuManager
 from .toolbar_widget import ToolbarWidget
 from .file_view_widget import FileViewWidget
@@ -63,12 +64,6 @@ class FileBrowser(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.current_view_mode = "详细信息"  # 当前视图模式
-        
-        # 压缩包查看模式相关
-        self.archive_viewing_mode = False  # 是否处于压缩包查看模式
-        self.current_archive_path = ""  # 当前查看的压缩包路径
-        self.archive_current_dir = ""   # 压缩包内当前目录
         
         # 初始化管理器
         self.signal_manager = get_signal_manager(self)
@@ -76,6 +71,15 @@ class FileBrowser(QWidget):
         self.archive_operation_manager = ArchiveOperationManager(self)
         self.error_manager = get_error_manager(self)
         self.state_manager = get_state_manager(self)
+        self.config_manager = get_config_manager(self)
+        
+        # 压缩包查看模式相关
+        self.archive_viewing_mode = False  # 是否处于压缩包查看模式
+        self.current_archive_path = ""  # 当前查看的压缩包路径
+        self.archive_current_dir = ""   # 压缩包内当前目录
+        
+        # 从配置中获取当前视图模式
+        self.current_view_mode = self.config_manager.get_config('behavior.file_view_mode', '详细信息')
         
         # 初始化UI组件
         self.init_ui()
@@ -183,8 +187,28 @@ class FileBrowser(QWidget):
         # 更新当前视图模式记录
         self.current_view_mode = new_mode
         
+        # 保存到配置管理器
+        self.config_manager.set_config('behavior.file_view_mode', new_mode)
+        
+        # 立即保存配置到文件
+        self.config_manager.save_configs()
+        
         # 更新工具栏按钮显示
         self.toolbar.update_view_mode(new_mode)
+        
+        print(f"视图模式已切换为: {new_mode} 并保存到配置文件")  # 调试信息
+        
+    def set_view_mode(self, mode):
+        """设置视图模式"""
+        if mode != self.current_view_mode:
+            # 如果当前模式与目标模式不同，则切换
+            self.file_view.set_view_mode(mode)
+            self.current_view_mode = mode
+            
+            # 更新工具栏按钮显示
+            self.toolbar.update_view_mode(mode)
+            
+            print(f"视图模式已设置为: {mode}")  # 调试信息
         
     def set_root_path(self, path):
         """设置根路径"""
@@ -902,24 +926,54 @@ class FileBrowser(QWidget):
     def restore_browser_state(self):
         """恢复文件浏览器状态"""
         try:
-            # 恢复视图模式
-            saved_view_mode = self.state_manager.get_state("browser.view_mode", "详细信息")
-            self.current_view_mode = saved_view_mode
-            self.toolbar.view_toggle_requested.emit(saved_view_mode)
+            # 从配置管理器获取行为设置
+            behavior_config = self.config_manager.get_behavior_config()
             
-            # 恢复当前路径
-            saved_path = self.state_manager.get_state("browser.current_path", "")
-            if saved_path and os.path.exists(saved_path):
-                self.file_view.set_current_path(saved_path)
+            # 恢复视图模式
+            saved_view_mode = behavior_config['file_view_mode']
+            self.current_view_mode = saved_view_mode
+            
+            # 实际设置FileViewWidget的视图模式
+            self.file_view.set_view_mode(saved_view_mode)
+            
+            # 更新工具栏显示  
+            self.toolbar.update_view_mode(saved_view_mode)
+            
+            print(f"恢复视图模式: {saved_view_mode}")  # 调试信息
             
             # 恢复显示隐藏文件设置
-            show_hidden = self.state_manager.get_state("browser.show_hidden_files", False)
-            self.file_view.set_show_hidden_files(show_hidden)
+            show_hidden = behavior_config['show_hidden_files']
+            if hasattr(self.file_view, 'set_show_hidden_files'):
+                self.file_view.set_show_hidden_files(show_hidden)
             
             # 恢复排序设置
-            sort_column = self.state_manager.get_state("browser.sort_column", 0)
-            sort_order = self.state_manager.get_state("browser.sort_order", 0)
-            self.file_view.set_sort_settings(sort_column, sort_order)
+            sort_column = behavior_config['sort_column']
+            sort_order = behavior_config['sort_order']
+            if hasattr(self.file_view, 'set_sort_settings'):
+                self.file_view.set_sort_settings(sort_column, sort_order)
+            
+            # 恢复当前路径（从状态管理器）
+            saved_path = self.state_manager.get_state("browser.current_path", "")
+            if saved_path and os.path.exists(saved_path):
+                self.set_root_path(saved_path)
+            else:
+                # 根据配置决定启动路径
+                startup_path = self.config_manager.get_config('general.startup_path', 'desktop')
+                if startup_path == 'desktop':
+                    desktop_path = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
+                    self.set_root_path(desktop_path)
+                elif startup_path == 'home':
+                    home_path = QStandardPaths.writableLocation(QStandardPaths.HomeLocation)
+                    self.set_root_path(home_path)
+                elif startup_path == 'documents':
+                    documents_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+                    self.set_root_path(documents_path)
+                elif startup_path == 'last_location' and saved_path:
+                    self.set_root_path(saved_path)
+                else:
+                    # 默认到桌面
+                    desktop_path = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
+                    self.set_root_path(desktop_path)
             
             # 恢复压缩包状态
             archive_mode = self.state_manager.get_state("archive.viewing_mode", False)
@@ -930,7 +984,8 @@ class FileBrowser(QWidget):
                     self.archive_viewing_mode = archive_mode
                     self.current_archive_path = archive_path
                     self.archive_current_dir = archive_dir
-                    self.file_view.set_archive_mode(True, archive_path, archive_dir)
+                    if hasattr(self.file_view, 'set_archive_mode'):
+                        self.file_view.set_archive_mode(True, archive_path, archive_dir)
             
         except Exception as e:
             self.error_manager.handle_exception(

@@ -391,6 +391,39 @@ class FileViewWidget(QWidget):
         
         return self.current_view_mode
     
+    def set_view_mode(self, mode):
+        """设置视图模式（不切换，直接设置）"""
+        if mode == self.current_view_mode:
+            return  # 已经是目标模式，不需要改变
+            
+        if mode == "图标":
+            # 设置为图标视图
+            self.tree_view.hide()
+            
+            # 移除树视图，添加列表视图
+            layout = self.layout()
+            layout.removeWidget(self.tree_view)
+            layout.addWidget(self.list_view)
+            self.list_view.show()
+            
+            self.current_view = self.list_view
+            self.current_view_mode = "图标"
+        else:
+            # 设置为详细信息视图
+            self.list_view.hide()
+            
+            # 移除列表视图，添加树视图
+            layout = self.layout()
+            layout.removeWidget(self.list_view)
+            layout.addWidget(self.tree_view)
+            self.tree_view.show()
+            
+            self.current_view = self.tree_view
+            self.current_view_mode = "详细信息"
+        
+        # 设置图标视图显示
+        self.setup_icon_view()
+    
     def setup_icon_view(self):
         """设置图标视图的显示参数"""
         # 根据当前视图调整显示
@@ -451,4 +484,36 @@ class FileViewWidget(QWidget):
     def clear_selection(self):
         """清除选择"""
         if self.current_view.selectionModel():
-            self.current_view.selectionModel().clearSelection() 
+            self.current_view.selectionModel().clearSelection()
+    
+    def get_current_path(self):
+        """获取当前路径"""
+        # 这个方法需要从根索引获取路径
+        root_index = self.current_view.rootIndex()
+        if root_index.isValid() and hasattr(self.current_view.model(), 'filePath'):
+            return self.current_view.model().filePath(root_index)
+        return ""
+    
+    def get_show_hidden_files(self):
+        """获取是否显示隐藏文件"""
+        # 这里可以返回模型的过滤器设置，暂时返回False
+        return False
+    
+    def set_show_hidden_files(self, show_hidden):
+        """设置是否显示隐藏文件"""
+        # 这里可以设置模型的过滤器，暂时不实现
+        pass
+    
+    def get_sort_settings(self):
+        """获取排序设置"""
+        if self.current_view == self.tree_view and self.tree_view.header():
+            sort_column = self.tree_view.header().sortIndicatorSection()
+            sort_order = self.tree_view.header().sortIndicatorOrder()
+            return sort_column, int(sort_order)
+        return 0, 0
+    
+    def set_sort_settings(self, column, order):
+        """设置排序设置"""
+        if self.current_view == self.tree_view and self.tree_view.header():
+            sort_order = Qt.AscendingOrder if order == 0 else Qt.DescendingOrder
+            self.tree_view.header().setSortIndicator(column, sort_order) 

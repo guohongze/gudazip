@@ -20,9 +20,11 @@ import sys
 from .ui.file_browser import FileBrowser
 from .ui.create_archive_dialog import CreateArchiveDialog
 from .ui.extract_archive_dialog import ExtractArchiveDialog
+from .ui.settings_dialog import SettingsDialog
 from .core.archive_manager import ArchiveManager
 from .core.error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
 from .core.state_manager import StateManager, StateScope, StatePersistenceType, get_state_manager
+from .core.config_manager import ConfigManager, get_config_manager
 
 
 class MainWindow(QMainWindow):
@@ -33,12 +35,16 @@ class MainWindow(QMainWindow):
         self.archive_manager = ArchiveManager(self)
         self.error_manager = get_error_manager(self)
         self.state_manager = get_state_manager(self)
+        self.config_manager = get_config_manager(self)
         
         self.init_ui()
         self.setup_actions()
         self.setup_menus()
         self.setup_toolbar()
         self.setup_statusbar()
+        
+        # 连接配置变更信号
+        self.config_manager.config_changed.connect(self.on_config_changed)
         
         # 恢复窗口状态
         self.restore_window_state()
@@ -51,16 +57,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("GudaZip - 压缩包管理工具")
         self.setWindowIcon(QIcon("assets/icon.png"))
         
-        # 从状态管理器获取窗口几何信息
-        saved_geometry = self.state_manager.get_state("window.geometry")
-        if saved_geometry:
-            self.restoreGeometry(saved_geometry)
-        else:
-            self.setGeometry(100, 100, 1200, 800)
-        
-        # 检查是否应该最大化
-        if self.state_manager.get_state("window.maximized", False):
-            self.showMaximized()
+        # 应用外观配置
+        self.apply_appearance_config()
         
         # 创建中央窗口部件
         central_widget = QWidget()
@@ -82,6 +80,98 @@ class MainWindow(QMainWindow):
         # 连接打开压缩包信号 - 在文件浏览器内查看
         self.file_browser.archiveOpenRequested.connect(self.open_archive_in_browser)
         
+    def apply_appearance_config(self):
+        """应用外观配置"""
+        try:
+            appearance_config = self.config_manager.get_appearance_config()
+            
+            # 设置字体
+            font = QFont(appearance_config['font_family'], appearance_config['font_size'])
+            self.setFont(font)
+            
+            # 设置窗口透明度
+            self.setWindowOpacity(appearance_config['window_opacity'])
+            
+            # 应用主题（这里可以扩展支持不同主题）
+            theme = appearance_config['theme']
+            if theme == 'dark':
+                self.apply_dark_theme()
+            else:
+                self.apply_light_theme()
+                
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "apply_appearance_config"},
+                category=ErrorCategory.APP_CONFIGURATION,
+                show_dialog=False
+            )
+    
+    def apply_light_theme(self):
+        """应用浅色主题"""
+        self.setStyleSheet("""
+        QMainWindow {
+            background-color: #ffffff;
+            color: #000000;
+        }
+        QMenuBar {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        QStatusBar {
+            background-color: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+        }
+        """)
+    
+    def apply_dark_theme(self):
+        """应用深色主题"""
+        self.setStyleSheet("""
+        QMainWindow {
+            background-color: #2b2b2b;
+            color: #ffffff;
+        }
+        QMenuBar {
+            background-color: #3c3c3c;
+            color: #ffffff;
+            border-bottom: 1px solid #555555;
+        }
+        QMenuBar::item:selected {
+            background-color: #555555;
+        }
+        QStatusBar {
+            background-color: #3c3c3c;
+            color: #ffffff;
+            border-top: 1px solid #555555;
+        }
+        """)
+    
+    def on_config_changed(self, key: str, old_value, new_value):
+        """处理配置变更"""
+        try:
+            if key.startswith('appearance.'):
+                # 外观相关配置变更，重新应用配置
+                self.apply_appearance_config()
+            elif key.startswith('window.'):
+                # 窗口相关配置变更
+                if key == 'window.center_on_startup':
+                    # 居中设置变更时不需要立即处理，下次启动时生效
+                    pass
+            elif key.startswith('behavior.'):
+                # 行为相关配置变更，通知文件浏览器
+                if key == 'behavior.file_view_mode':
+                    # 更新文件浏览器的视图模式
+                    if hasattr(self.file_browser, 'set_view_mode'):
+                        self.file_browser.set_view_mode(new_value)
+                        
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "on_config_changed", "key": key},
+                category=ErrorCategory.APP_CONFIGURATION,
+                show_dialog=False
+            )
+    
     def setup_actions(self):
         """设置动作"""
         # 新建压缩包
@@ -347,8 +437,8 @@ class MainWindow(QMainWindow):
         
     def show_settings(self):
         """显示设置对话框"""
-        # TODO: 实现设置对话框
-        QMessageBox.information(self, "提示", "设置功能开发中...")
+        dialog = SettingsDialog(self)
+        dialog.exec()
         
     def show_about(self):
         """显示关于对话框"""
@@ -520,15 +610,45 @@ class MainWindow(QMainWindow):
     def restore_window_state(self):
         """恢复窗口状态"""
         try:
-            # 恢复窗口几何信息
-            geometry = self.state_manager.get_state("window.geometry")
-            if geometry:
-                self.restoreGeometry(geometry)
+            # 获取窗口配置
+            window_config = self.config_manager.get_window_config()
             
-            # 恢复最大化状态
-            maximized = self.state_manager.get_state("window.maximized", False)
-            if maximized:
-                self.showMaximized()
+            # 获取保存的窗口几何信息
+            saved_geometry = self.state_manager.get_state("window.geometry")
+            saved_maximized = self.state_manager.get_state("window.maximized", False)
+            
+            # 如果记住窗口大小和位置，并且有保存的几何信息
+            if (window_config['remember_size'] and window_config['remember_position'] 
+                and saved_geometry):
+                self.restoreGeometry(saved_geometry)
+                
+                # 恢复最大化状态
+                if saved_maximized:
+                    self.showMaximized()
+            else:
+                # 使用默认大小
+                default_width = window_config['default_width']
+                default_height = window_config['default_height']
+                
+                # 如果记住窗口大小但不记住位置，使用保存的大小但居中显示
+                if window_config['remember_size'] and saved_geometry:
+                    self.restoreGeometry(saved_geometry)
+                    if window_config['center_on_startup']:
+                        self.center_on_screen()
+                else:
+                    # 使用默认大小
+                    self.resize(default_width, default_height)
+                    
+                    # 如果启用启动时居中，则居中显示
+                    if window_config['center_on_startup']:
+                        self.center_on_screen()
+                    else:
+                        # 默认位置
+                        self.move(100, 100)
+                
+                # 如果保存了最大化状态且允许恢复
+                if saved_maximized and window_config['remember_size']:
+                    self.showMaximized()
             
             # 恢复分割器状态（如果有的话）
             splitter_state = self.state_manager.get_state("window.splitter_state")
@@ -542,6 +662,38 @@ class MainWindow(QMainWindow):
                 category=ErrorCategory.APP_CONFIGURATION,
                 show_dialog=False
             )
+            # 如果恢复失败，使用默认设置
+            self.resize(1200, 800)
+            self.center_on_screen()
+    
+    def center_on_screen(self):
+        """将窗口居中显示"""
+        try:
+            # 获取屏幕几何信息
+            screen = self.screen()
+            if screen:
+                screen_geometry = screen.availableGeometry()
+                window_geometry = self.frameGeometry()
+                
+                # 计算居中位置
+                center_point = screen_geometry.center()
+                window_geometry.moveCenter(center_point)
+                
+                # 移动到居中位置
+                self.move(window_geometry.topLeft())
+            else:
+                # 如果无法获取屏幕信息，使用默认位置
+                self.move(100, 100)
+                
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "center_on_screen"},
+                category=ErrorCategory.APP_INTERNAL,
+                show_dialog=False
+            )
+            # 备用位置
+            self.move(100, 100)
     
     def save_window_state(self):
         """保存窗口状态"""
@@ -591,6 +743,13 @@ class MainWindow(QMainWindow):
             # 保存窗口状态
             self.save_window_state()
             
+            # 保存文件浏览器状态
+            if hasattr(self, 'file_browser'):
+                self.file_browser.save_browser_state()
+            
+            # 保存配置文件
+            self.config_manager.save_configs()
+            
             # 记录程序退出时间
             from datetime import datetime
             self.state_manager.set_state(
@@ -600,6 +759,8 @@ class MainWindow(QMainWindow):
                 persistence_type=StatePersistenceType.JSON,
                 description="程序最后关闭时间"
             )
+            
+            print("程序关闭，所有配置已保存")  # 调试信息
             
             # 接受关闭事件
             event.accept()
