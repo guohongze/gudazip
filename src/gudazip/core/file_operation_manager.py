@@ -3,6 +3,7 @@
 文件操作管理器
 负责所有文件系统相关的操作，包括创建、删除、重命名、复制、移动等
 将业务逻辑从UI层完全分离
+支持异步文件操作以避免UI冻结
 """
 
 import os
@@ -16,6 +17,15 @@ from PySide6.QtCore import QObject, Signal
 import logging
 
 logger = logging.getLogger(__name__)
+
+# 异步操作支持
+try:
+    from .async_file_operations import AsyncFileOperationManager
+    ASYNC_OPERATIONS_AVAILABLE = True
+except ImportError:
+    AsyncFileOperationManager = None
+    ASYNC_OPERATIONS_AVAILABLE = False
+    logger.warning("AsyncFileOperationManager not available, using synchronous operations only")
 
 
 class FileOperationResult:
@@ -84,18 +94,122 @@ class FileOperationManager(QObject):
     - 权限检查和管理
     - 剪贴板操作
     - 错误处理和用户交互
+    - 异步文件操作支持
     """
     
     # 信号定义
     operation_started = Signal(str, list)  # 操作开始 (操作类型, 文件列表)
     operation_finished = Signal(str, object)  # 操作完成 (操作类型, FileOperationResult)
     progress_updated = Signal(int, int)  # 进度更新 (当前, 总数)
+    # 异步操作信号
+    async_operation_started = Signal(str, str, str)  # operation_id, operation_type, description
+    async_operation_completed = Signal(str, str, object)  # operation_id, operation_type, result
+    async_operation_failed = Signal(str, str, str)  # operation_id, operation_type, error_message
     
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, enable_async: bool = True):
         super().__init__()
         self.parent_widget = parent
         self.clipboard = ClipboardManager()
         
+        # 异步操作配置
+        self.enable_async = enable_async and ASYNC_OPERATIONS_AVAILABLE
+        self.async_manager = None
+        
+        if self.enable_async:
+            try:
+                self.async_manager = AsyncFileOperationManager(self)
+                # 连接异步操作信号
+                self.async_manager.operation_started.connect(self._on_async_operation_started)
+                self.async_manager.operation_completed.connect(self._on_async_operation_completed)
+                self.async_manager.operation_failed.connect(self._on_async_operation_failed)
+                logger.info("Async file operations enabled")
+            except Exception as e:
+                logger.error(f"Failed to initialize async operations: {e}")
+                self.enable_async = False
+                self.async_manager = None
+        
+        # 异步操作阈值配置（文件数量超过此值时使用异步操作）
+        self.async_threshold = {
+            'copy': 5,      # 复制超过5个文件时使用异步
+            'move': 3,      # 移动超过3个文件时使用异步
+            'delete': 10,   # 删除超过10个文件时使用异步
+            'paste': 5      # 粘贴超过5个文件时使用异步
+        }
+        
+    def _on_async_operation_started(self, operation_id: str, description: str):
+        """处理异步操作开始信号"""
+        # 提取操作类型
+        operation_type = "async_operation"
+        if "复制" in description:
+            operation_type = "copy"
+        elif "移动" in description:
+            operation_type = "move"
+        elif "删除" in description:
+            operation_type = "delete"
+        elif "解压" in description:
+            operation_type = "extract"
+        
+        self.async_operation_started.emit(operation_id, operation_type, description)
+    
+    def _on_async_operation_completed(self, operation_id: str, result):
+        """处理异步操作完成信号"""
+        # 转换为FileOperationResult格式
+        if isinstance(result, dict):
+            if result.get('success', False):
+                affected_files = []
+                if 'copied_files' in result:
+                    affected_files = result['copied_files']
+                elif 'moved_files' in result:
+                    affected_files = result['moved_files']
+                elif 'deleted_files' in result:
+                    affected_files = result['deleted_files']
+                elif 'extracted_files' in result:
+                    affected_files = result['extracted_files']
+                
+                # 构建成功消息
+                if 'copied_files' in result:
+                    message = f"成功复制 {len(affected_files)} 个项目"
+                    if result.get('total_size', 0) > 0:
+                        size_mb = result['total_size'] / (1024 * 1024)
+                        message += f"，总大小: {size_mb:.1f} MB"
+                elif 'moved_files' in result:
+                    message = f"成功移动 {len(affected_files)} 个项目"
+                elif 'deleted_files' in result:
+                    message = f"成功删除 {len(affected_files)} 个项目"
+                elif 'extracted_files' in result:
+                    message = f"成功解压 {len(affected_files)} 个文件到 {os.path.basename(result.get('target_dir', ''))}"
+                else:
+                    message = "操作完成"
+                
+                # 添加失败信息
+                if result.get('failed_files'):
+                    failed_count = len(result['failed_files'])
+                    message += f"，{failed_count} 个项目失败"
+                
+                file_result = FileOperationResult(True, message, affected_files)
+            else:
+                message = "操作失败"
+                if result.get('failed_files'):
+                    message = "操作部分失败：\n" + "\n".join(result['failed_files'][:5])  # 只显示前5个错误
+                    if len(result['failed_files']) > 5:
+                        message += f"\n还有 {len(result['failed_files']) - 5} 个错误..."
+                
+                file_result = FileOperationResult(False, message, result.get('copied_files', []) or result.get('moved_files', []) or result.get('deleted_files', []))
+        else:
+            file_result = FileOperationResult(True, "异步操作完成", [])
+        
+        # 发送操作完成信号（保持与同步操作的一致性）
+        operation_type = "async_operation"
+        self.operation_finished.emit(operation_type, file_result)
+        self.async_operation_completed.emit(operation_id, operation_type, file_result)
+    
+    def _on_async_operation_failed(self, operation_id: str, error_message: str):
+        """处理异步操作失败信号"""
+        file_result = FileOperationResult(False, f"异步操作失败: {error_message}", error_details=error_message)
+        operation_type = "async_operation"
+        self.operation_finished.emit(operation_type, file_result)
+        self.async_operation_failed.emit(operation_id, operation_type, error_message)
+    
     def set_parent_widget(self, parent: QWidget):
         """设置父窗口，用于显示对话框"""
         self.parent_widget = parent
@@ -195,13 +309,14 @@ class FileOperationManager(QObject):
             self.operation_finished.emit("create_file", result)
             return result
     
-    def delete_files(self, file_paths: List[str], confirm: bool = True) -> FileOperationResult:
+    def delete_files(self, file_paths: List[str], confirm: bool = True, force_sync: bool = False) -> FileOperationResult:
         """
         删除多个文件或文件夹
         
         Args:
             file_paths: 要删除的文件路径列表
             confirm: 是否需要用户确认
+            force_sync: 强制使用同步操作（忽略异步阈值）
             
         Returns:
             FileOperationResult: 操作结果
@@ -224,33 +339,53 @@ class FileOperationManager(QObject):
             if not self._confirm_delete_operation(existing_paths):
                 return FileOperationResult(False, "用户取消了删除操作")
         
-        # 执行删除
-        self.operation_started.emit("delete", existing_paths)
-        success_count = 0
-        failed_items = []
+        # 决定是否使用异步操作
+        should_use_async = (
+            not force_sync and 
+            self.enable_async and 
+            self.async_manager and 
+            len(existing_paths) >= self.async_threshold.get('delete', 10)
+        )
         
-        for i, file_path in enumerate(existing_paths):
-            self.progress_updated.emit(i + 1, len(existing_paths))
-            try:
-                if os.path.isdir(file_path):
-                    shutil.rmtree(file_path)
-                else:
-                    os.remove(file_path)
-                success_count += 1
-            except Exception as e:
-                failed_items.append(f"{os.path.basename(file_path)}: {str(e)}")
-        
-        # 构建结果
-        if failed_items:
-            error_message = "以下项目删除失败：\n" + "\n".join(failed_items)
-            result = FileOperationResult(False, error_message, 
-                                       existing_paths[:success_count], 
-                                       error_details=str(failed_items))
+        if should_use_async:
+            # 使用异步操作
+            operation_id = self.async_manager.delete_files_async(existing_paths, show_progress=True)
+            logger.info(f"Started async delete operation {operation_id} for {len(existing_paths)} files")
+            # 返回异步操作结果，包含operation_id
+            return FileOperationResult(
+                True, 
+                f"正在异步删除 {len(existing_paths)} 个项目...", 
+                existing_paths,
+                error_details=f"async_operation_id:{operation_id}"
+            )
         else:
-            result = FileOperationResult(True, f"成功删除 {success_count} 个项目", existing_paths)
-        
-        self.operation_finished.emit("delete", result)
-        return result
+            # 使用同步操作（原有逻辑）
+            self.operation_started.emit("delete", existing_paths)
+            success_count = 0
+            failed_items = []
+            
+            for i, file_path in enumerate(existing_paths):
+                self.progress_updated.emit(i + 1, len(existing_paths))
+                try:
+                    if os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                    else:
+                        os.remove(file_path)
+                    success_count += 1
+                except Exception as e:
+                    failed_items.append(f"{os.path.basename(file_path)}: {str(e)}")
+            
+            # 构建结果
+            if failed_items:
+                error_message = "以下项目删除失败：\n" + "\n".join(failed_items)
+                result = FileOperationResult(False, error_message, 
+                                           existing_paths[:success_count], 
+                                           error_details=str(failed_items))
+            else:
+                result = FileOperationResult(True, f"成功删除 {success_count} 个项目", existing_paths)
+            
+            self.operation_finished.emit("delete", result)
+            return result
     
     def rename_file(self, file_path: str, new_name: str = None) -> FileOperationResult:
         """
@@ -344,57 +479,104 @@ class FileOperationManager(QObject):
         else:
             return FileOperationResult(False, "剪切失败：没有有效的文件")
     
-    def paste_from_clipboard(self, target_dir: str) -> FileOperationResult:
-        """从剪贴板粘贴文件"""
+    def paste_from_clipboard(self, target_dir: str, force_sync: bool = False) -> FileOperationResult:
+        """
+        从剪贴板粘贴文件
+        
+        Args:
+            target_dir: 目标目录
+            force_sync: 强制使用同步操作（忽略异步阈值）
+            
+        Returns:
+            FileOperationResult: 操作结果
+        """
         if self.clipboard.is_empty():
             return FileOperationResult(False, "剪贴板为空")
         
         if not os.path.exists(target_dir) or not os.path.isdir(target_dir):
             return FileOperationResult(False, "目标路径不存在或不是文件夹")
         
-        self.operation_started.emit("paste", self.clipboard.items)
-        success_count = 0
-        error_count = 0
-        processed_files = []
+        # 决定是否使用异步操作
+        should_use_async = (
+            not force_sync and 
+            self.enable_async and 
+            self.async_manager and 
+            len(self.clipboard.items) >= self.async_threshold.get('paste', 5)
+        )
         
-        for i, source_path in enumerate(self.clipboard.items):
-            self.progress_updated.emit(i + 1, len(self.clipboard.items))
-            
-            if not os.path.exists(source_path):
-                error_count += 1
-                continue
-            
-            file_name = os.path.basename(source_path)
-            target_path = self._get_unique_target_path(target_dir, file_name)
-            
-            try:
-                if self.clipboard.operation == "copy":
-                    if os.path.isdir(source_path):
-                        shutil.copytree(source_path, target_path)
-                    else:
-                        shutil.copy2(source_path, target_path)
-                elif self.clipboard.operation == "cut":
-                    shutil.move(source_path, target_path)
+        if should_use_async:
+            # 使用异步操作
+            if self.clipboard.operation == "copy":
+                operation_id = self.async_manager.copy_files_async(self.clipboard.items, target_dir, show_progress=True)
+                logger.info(f"Started async copy operation {operation_id} for {len(self.clipboard.items)} files")
+                message = f"正在异步复制 {len(self.clipboard.items)} 个项目..."
+            elif self.clipboard.operation == "cut":
+                operation_id = self.async_manager.move_files_async(self.clipboard.items, target_dir, show_progress=True)
+                logger.info(f"Started async move operation {operation_id} for {len(self.clipboard.items)} files")
+                # 对于剪切操作，需要在完成后清空剪贴板
+                # 连接完成信号来处理剪贴板清理
+                def clear_clipboard_after_move(op_id, result):
+                    if op_id == operation_id and result.get('success', False):
+                        self.clipboard.clear()
+                        logger.info("Clipboard cleared after successful move operation")
                 
-                processed_files.append(target_path)
-                success_count += 1
-            except Exception as e:
-                logger.error(f"粘贴文件失败 {source_path}: {e}")
-                error_count += 1
-        
-        # 如果是剪切操作，清空剪贴板
-        if self.clipboard.operation == "cut":
-            self.clipboard.clear()
-        
-        # 构建结果
-        if error_count > 0:
-            message = f"粘贴完成：成功 {success_count} 个，失败 {error_count} 个"
-            result = FileOperationResult(success_count > 0, message, processed_files)
+                self.async_manager.operation_completed.connect(clear_clipboard_after_move)
+                message = f"正在异步移动 {len(self.clipboard.items)} 个项目..."
+            else:
+                return FileOperationResult(False, "未知的剪贴板操作类型")
+            
+            # 返回异步操作结果
+            return FileOperationResult(
+                True, 
+                message, 
+                self.clipboard.items.copy(),
+                error_details=f"async_operation_id:{operation_id}"
+            )
         else:
-            result = FileOperationResult(True, f"成功粘贴 {success_count} 个项目", processed_files)
-        
-        self.operation_finished.emit("paste", result)
-        return result
+            # 使用同步操作（原有逻辑）
+            self.operation_started.emit("paste", self.clipboard.items)
+            success_count = 0
+            error_count = 0
+            processed_files = []
+            
+            for i, source_path in enumerate(self.clipboard.items):
+                self.progress_updated.emit(i + 1, len(self.clipboard.items))
+                
+                if not os.path.exists(source_path):
+                    error_count += 1
+                    continue
+                
+                file_name = os.path.basename(source_path)
+                target_path = self._get_unique_target_path(target_dir, file_name)
+                
+                try:
+                    if self.clipboard.operation == "copy":
+                        if os.path.isdir(source_path):
+                            shutil.copytree(source_path, target_path)
+                        else:
+                            shutil.copy2(source_path, target_path)
+                    elif self.clipboard.operation == "cut":
+                        shutil.move(source_path, target_path)
+                    
+                    processed_files.append(target_path)
+                    success_count += 1
+                except Exception as e:
+                    logger.error(f"粘贴文件失败 {source_path}: {e}")
+                    error_count += 1
+            
+            # 如果是剪切操作，清空剪贴板
+            if self.clipboard.operation == "cut":
+                self.clipboard.clear()
+            
+            # 构建结果
+            if error_count > 0:
+                message = f"粘贴完成：成功 {success_count} 个，失败 {error_count} 个"
+                result = FileOperationResult(success_count > 0, message, processed_files)
+            else:
+                result = FileOperationResult(True, f"成功粘贴 {success_count} 个项目", processed_files)
+            
+            self.operation_finished.emit("paste", result)
+            return result
     
     def clear_clipboard(self):
         """清空剪贴板"""
@@ -447,6 +629,69 @@ class FileOperationManager(QObject):
             return FileOperationResult(True, f"已在文件管理器中打开: {os.path.basename(dir_path)}", [dir_path])
         except Exception as e:
             return FileOperationResult(False, f"无法打开目录: {str(e)}", error_details=str(e))
+    
+    # ========== 异步操作控制 ==========
+    
+    def set_async_enabled(self, enabled: bool):
+        """启用或禁用异步操作"""
+        if enabled and not ASYNC_OPERATIONS_AVAILABLE:
+            logger.warning("Cannot enable async operations: AsyncFileOperationManager not available")
+            return False
+        
+        self.enable_async = enabled
+        if enabled and not self.async_manager:
+            try:
+                self.async_manager = AsyncFileOperationManager(self)
+                # 连接异步操作信号
+                self.async_manager.operation_started.connect(self._on_async_operation_started)
+                self.async_manager.operation_completed.connect(self._on_async_operation_completed)
+                self.async_manager.operation_failed.connect(self._on_async_operation_failed)
+                logger.info("Async file operations enabled")
+            except Exception as e:
+                logger.error(f"Failed to initialize async operations: {e}")
+                self.enable_async = False
+                return False
+        
+        return True
+    
+    def is_async_enabled(self) -> bool:
+        """检查异步操作是否启用"""
+        return self.enable_async and self.async_manager is not None
+    
+    def set_async_threshold(self, operation: str, threshold: int):
+        """设置异步操作阈值"""
+        if operation in self.async_threshold:
+            self.async_threshold[operation] = threshold
+            logger.info(f"Set async threshold for {operation} to {threshold}")
+        else:
+            logger.warning(f"Unknown operation type for async threshold: {operation}")
+    
+    def get_async_threshold(self, operation: str) -> int:
+        """获取异步操作阈值"""
+        return self.async_threshold.get(operation, 0)
+    
+    def get_active_async_operations(self) -> List[Dict[str, Any]]:
+        """获取当前活动的异步操作"""
+        if self.async_manager:
+            return self.async_manager.get_active_operations()
+        return []
+    
+    def cancel_async_operation(self, operation_id: str) -> bool:
+        """取消异步操作"""
+        if self.async_manager:
+            return self.async_manager.cancel_operation(operation_id)
+        return False
+    
+    def cleanup_async_operations(self):
+        """清理已完成的异步操作记录"""
+        if self.async_manager:
+            self.async_manager.cleanup_completed_operations()
+    
+    def get_async_operation_status(self, operation_id: str) -> Optional[Dict[str, Any]]:
+        """获取异步操作状态"""
+        if self.async_manager:
+            return self.async_manager.get_operation_status(operation_id)
+        return None
     
     # ========== 私有辅助方法 ==========
     

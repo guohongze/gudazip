@@ -3,6 +3,7 @@
 压缩包操作管理器
 负责所有压缩包相关的操作，包括解压、查看、修改等
 将压缩包业务逻辑从UI层完全分离
+支持异步解压操作以避免UI冻结
 """
 
 import os
@@ -14,6 +15,15 @@ from typing import List, Optional, Dict, Any, Tuple
 from PySide6.QtWidgets import QMessageBox, QInputDialog, QWidget
 from PySide6.QtCore import QObject, Signal
 import logging
+
+# 异步操作支持
+try:
+    from .async_file_operations import AsyncFileOperationManager
+    ASYNC_OPERATIONS_AVAILABLE = True
+except ImportError:
+    AsyncFileOperationManager = None
+    ASYNC_OPERATIONS_AVAILABLE = False
+    logger.warning("AsyncFileOperationManager not available for archives, using synchronous operations only")
 
 logger = logging.getLogger(__name__)
 
@@ -67,18 +77,43 @@ class ArchiveOperationManager(QObject):
     - 文件解压和临时文件管理
     - 压缩包文件的修改（重命名、删除等）
     - 压缩包内文件的打开和预览
+    - 异步解压操作支持
     """
     
     # 信号定义
     operation_started = Signal(str, str)  # 操作开始 (操作类型, 压缩包路径)
     operation_finished = Signal(str, object)  # 操作完成 (操作类型, ArchiveOperationResult)
     extraction_progress = Signal(int, int)  # 解压进度 (当前, 总数)
+    # 异步操作信号
+    async_operation_started = Signal(str, str, str)  # operation_id, operation_type, description
+    async_operation_completed = Signal(str, str, object)  # operation_id, operation_type, result
+    async_operation_failed = Signal(str, str, str)  # operation_id, operation_type, error_message
     
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, enable_async: bool = True):
         super().__init__()
         self.parent_widget = parent
         self.archive_manager = None
         self.temp_directories = []  # 记录创建的临时目录，用于清理
+        
+        # 异步操作配置
+        self.enable_async = enable_async and ASYNC_OPERATIONS_AVAILABLE
+        self.async_manager = None
+        
+        if self.enable_async:
+            try:
+                self.async_manager = AsyncFileOperationManager(self)
+                # 连接异步操作信号
+                self.async_manager.operation_started.connect(self._on_async_operation_started)
+                self.async_manager.operation_completed.connect(self._on_async_operation_completed)
+                self.async_manager.operation_failed.connect(self._on_async_operation_failed)
+                logger.info("Async archive operations enabled")
+            except Exception as e:
+                logger.error(f"Failed to initialize async archive operations: {e}")
+                self.enable_async = False
+                self.async_manager = None
+        
+        # 异步操作阈值（文件数量超过此值时使用异步操作）
+        self.async_extract_threshold = 10  # 解压超过10个文件时使用异步
         
         # 初始化ArchiveManager
         self._init_archive_manager()
@@ -270,7 +305,8 @@ class ArchiveOperationManager(QObject):
             return result
     
     def extract_archive_to_directory(self, archive_path: str, target_dir: str, 
-                                   selected_files: Optional[List[str]] = None) -> ArchiveOperationResult:
+                                   selected_files: Optional[List[str]] = None,
+                                   force_sync: bool = False) -> ArchiveOperationResult:
         """
         解压压缩包到指定目录
         
@@ -278,6 +314,7 @@ class ArchiveOperationManager(QObject):
             archive_path: 压缩包路径
             target_dir: 目标目录
             selected_files: 要解压的文件列表（None表示解压全部）
+            force_sync: 强制使用同步操作（忽略异步阈值）
             
         Returns:
             ArchiveOperationResult: 操作结果
@@ -288,33 +325,78 @@ class ArchiveOperationManager(QObject):
         if not os.path.exists(target_dir) or not os.path.isdir(target_dir):
             return ArchiveOperationResult(False, "目标目录不存在或不是文件夹")
         
-        try:
-            self.operation_started.emit("extract_archive", archive_path)
-            
-            success = self.archive_manager.extract_archive(
+        # 计算要解压的文件数量
+        if selected_files:
+            file_count = len(selected_files)
+        else:
+            # 尝试获取压缩包文件总数
+            try:
+                contents_result = self.list_archive_contents(archive_path)
+                if contents_result.success:
+                    file_count = len(contents_result.data)
+                else:
+                    file_count = 1  # 无法获取时假设较少文件，使用同步操作
+            except:
+                file_count = 1
+        
+        # 决定是否使用异步操作
+        should_use_async = (
+            not force_sync and 
+            self.enable_async and 
+            self.async_manager and 
+            file_count >= self.async_extract_threshold
+        )
+        
+        if should_use_async:
+            # 使用异步操作
+            operation_id = self.async_manager.extract_archive_async(
                 archive_path, 
                 target_dir, 
-                selected_files=selected_files
+                selected_files, 
+                show_progress=True
             )
+            logger.info(f"Started async extract operation {operation_id} for {file_count} files")
             
-            if success:
-                file_count = len(selected_files) if selected_files else "所有"
-                result = ArchiveOperationResult(
-                    True,
-                    f"成功解压 {file_count} 个文件到 {target_dir}",
-                    {"target_dir": target_dir, "extracted_files": selected_files}
-                )
+            # 返回异步操作结果
+            if selected_files:
+                message = f"正在异步解压 {len(selected_files)} 个文件..."
             else:
-                result = ArchiveOperationResult(False, "解压失败")
+                message = f"正在异步解压整个压缩包..."
             
-            self.operation_finished.emit("extract_archive", result)
-            return result
-            
-        except Exception as e:
-            error_msg = f"解压失败: {str(e)}"
-            result = ArchiveOperationResult(False, error_msg, error_details=str(e))
-            self.operation_finished.emit("extract_archive", result)
-            return result
+            return ArchiveOperationResult(
+                True,
+                message,
+                {"target_dir": target_dir, "async_operation_id": operation_id}
+            )
+        else:
+            # 使用同步操作（原有逻辑）
+            try:
+                self.operation_started.emit("extract_archive", archive_path)
+                
+                success = self.archive_manager.extract_archive(
+                    archive_path, 
+                    target_dir, 
+                    selected_files=selected_files
+                )
+                
+                if success:
+                    file_count_text = len(selected_files) if selected_files else "所有"
+                    result = ArchiveOperationResult(
+                        True,
+                        f"成功解压 {file_count_text} 个文件到 {target_dir}",
+                        {"target_dir": target_dir, "extracted_files": selected_files}
+                    )
+                else:
+                    result = ArchiveOperationResult(False, "解压失败")
+                
+                self.operation_finished.emit("extract_archive", result)
+                return result
+                
+            except Exception as e:
+                error_msg = f"解压失败: {str(e)}"
+                result = ArchiveOperationResult(False, error_msg, error_details=str(e))
+                self.operation_finished.emit("extract_archive", result)
+                return result
     
     # ========== 文件打开操作 ==========
     
@@ -550,6 +632,66 @@ class ArchiveOperationManager(QObject):
         except Exception as e:
             return ArchiveOperationResult(False, f"无法打开文件夹: {str(e)}", error_details=str(e))
     
+    # ========== 异步操作控制 ==========
+    
+    def set_async_enabled(self, enabled: bool):
+        """启用或禁用异步解压操作"""
+        if enabled and not ASYNC_OPERATIONS_AVAILABLE:
+            logger.warning("Cannot enable async operations: AsyncFileOperationManager not available")
+            return False
+        
+        self.enable_async = enabled
+        if enabled and not self.async_manager:
+            try:
+                self.async_manager = AsyncFileOperationManager(self)
+                # 连接异步操作信号
+                self.async_manager.operation_started.connect(self._on_async_operation_started)
+                self.async_manager.operation_completed.connect(self._on_async_operation_completed)
+                self.async_manager.operation_failed.connect(self._on_async_operation_failed)
+                logger.info("Async archive operations enabled")
+            except Exception as e:
+                logger.error(f"Failed to initialize async archive operations: {e}")
+                self.enable_async = False
+                return False
+        
+        return True
+    
+    def is_async_enabled(self) -> bool:
+        """检查异步操作是否启用"""
+        return self.enable_async and self.async_manager is not None
+    
+    def set_async_extract_threshold(self, threshold: int):
+        """设置异步解压阈值"""
+        self.async_extract_threshold = threshold
+        logger.info(f"Set async extract threshold to {threshold}")
+    
+    def get_async_extract_threshold(self) -> int:
+        """获取异步解压阈值"""
+        return self.async_extract_threshold
+    
+    def get_active_async_operations(self) -> List[Dict[str, Any]]:
+        """获取当前活动的异步操作"""
+        if self.async_manager:
+            return self.async_manager.get_active_operations()
+        return []
+    
+    def cancel_async_operation(self, operation_id: str) -> bool:
+        """取消异步操作"""
+        if self.async_manager:
+            return self.async_manager.cancel_operation(operation_id)
+        return False
+    
+    def cleanup_async_operations(self):
+        """清理已完成的异步操作记录"""
+        if self.async_manager:
+            self.async_manager.cleanup_completed_operations()
+    
+    def get_async_operation_status(self, operation_id: str) -> Optional[Dict[str, Any]]:
+        """获取异步操作状态"""
+        if self.async_manager:
+            return self.async_manager.get_operation_status(operation_id)
+        return None
+
     # ========== 临时文件管理 ==========
     
     def cleanup_temp_files(self):
@@ -565,4 +707,45 @@ class ArchiveOperationManager(QObject):
     
     def __del__(self):
         """析构函数，自动清理临时文件"""
-        self.cleanup_temp_files() 
+        self.cleanup_temp_files()
+    
+    def _on_async_operation_started(self, operation_id: str, description: str):
+        """处理异步操作开始信号"""
+        self.async_operation_started.emit(operation_id, "extract", description)
+    
+    def _on_async_operation_completed(self, operation_id: str, result):
+        """处理异步操作完成信号"""
+        # 转换为ArchiveOperationResult格式
+        if isinstance(result, dict) and result.get('success', False):
+            extracted_files = result.get('extracted_files', [])
+            target_dir = result.get('target_dir', '')
+            message = f"成功解压 {len(extracted_files)} 个文件到 {os.path.basename(target_dir)}"
+            
+            # 添加失败信息
+            if result.get('failed_files'):
+                failed_count = len(result['failed_files'])
+                message += f"，{failed_count} 个文件失败"
+            
+            archive_result = ArchiveOperationResult(
+                True, 
+                message,
+                {"target_dir": target_dir, "extracted_files": extracted_files}
+            )
+        else:
+            error_message = "解压失败"
+            if isinstance(result, dict) and result.get('failed_files'):
+                error_message = "解压部分失败：\n" + "\n".join(result['failed_files'][:3])
+                if len(result['failed_files']) > 3:
+                    error_message += f"\n还有 {len(result['failed_files']) - 3} 个错误..."
+            
+            archive_result = ArchiveOperationResult(False, error_message)
+        
+        # 发送操作完成信号（保持与同步操作的一致性）
+        self.operation_finished.emit("extract_archive", archive_result)
+        self.async_operation_completed.emit(operation_id, "extract", archive_result)
+    
+    def _on_async_operation_failed(self, operation_id: str, error_message: str):
+        """处理异步操作失败信号"""
+        archive_result = ArchiveOperationResult(False, f"异步解压失败: {error_message}", error_details=error_message)
+        self.operation_finished.emit("extract_archive", archive_result)
+        self.async_operation_failed.emit(operation_id, "extract", error_message) 

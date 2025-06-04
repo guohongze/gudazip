@@ -392,19 +392,14 @@ class FileBrowser(QWidget):
                 file_path = index.data(Qt.UserRole + 1)
                 self.open_archive_file(file_path)
         else:
-            # 文件系统模式下的原有逻辑
+            # 文件系统模式下的双击处理
             file_path = self.file_model.filePath(index)
             if self.file_model.isDir(index):
                 # 如果是文件夹，进入该文件夹
                 self.set_root_path(file_path)
             else:
-                # 如果是文件，检查是否为压缩文件
-                if self.is_archive_file(file_path):
-                    # 压缩文件，发送打开压缩包信号
-                    self.archiveOpenRequested.emit(file_path)
-                else:
-                    # 普通文件，发送选中信号
-                    self.fileSelected.emit(file_path)
+                # 如果是文件，直接打开文件
+                self.open_file(file_path)
                 
     def on_selection_changed(self):
         """处理选择变化事件"""
