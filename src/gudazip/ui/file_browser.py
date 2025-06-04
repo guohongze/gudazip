@@ -21,6 +21,7 @@ from datetime import datetime
 import ctypes
 from pathlib import Path
 import tempfile
+import zipfile
 
 # Windows API 相关导入
 if sys.platform == "win32":
@@ -422,7 +423,7 @@ class FileBrowser(QWidget):
         # 设置多选模式
         self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
         
-        # 设置上下文菜单
+        # 强制设置上下文菜单策略，确保使用我们的自定义菜单
         self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree_view.customContextMenuRequested.connect(self.show_context_menu)
         
@@ -449,7 +450,7 @@ class FileBrowser(QWidget):
         # 设置移动和拖拽
         self.list_view.setMovement(QListView.Static)  # 静态排列，不允许拖拽重排
         
-        # 设置列表视图的上下文菜单
+        # 强制设置列表视图的上下文菜单策略
         self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_view.customContextMenuRequested.connect(self.show_list_context_menu)
         
@@ -854,10 +855,9 @@ class FileBrowser(QWidget):
                 folder_path = index.data(Qt.UserRole + 1)
                 self.navigate_archive_directory(folder_path)
             elif item_type == 'file':
-                # 双击文件，可以考虑添加解压预览功能
+                # 双击文件，解压到临时目录并打开
                 file_path = index.data(Qt.UserRole + 1)
-                print(f"双击压缩包中的文件: {file_path}")
-                # TODO: 实现文件预览或解压功能
+                self.open_archive_file(file_path)
         else:
             # 文件系统模式下的原有逻辑
             file_path = self.file_model.filePath(index)
@@ -906,28 +906,93 @@ class FileBrowser(QWidget):
 
     def show_context_menu(self, position):
         """显示树视图上下文菜单"""
+        print(f"🖱️ 树视图右键菜单触发 - 位置: {position}")
         index = self.tree_view.indexAt(position)
         self._show_context_menu(index, self.tree_view.mapToGlobal(position))
         
     def show_list_context_menu(self, position):
         """显示列表视图上下文菜单"""
+        print(f"🖱️ 列表视图右键菜单触发 - 位置: {position}")
         index = self.list_view.indexAt(position)
         self._show_context_menu(index, self.list_view.mapToGlobal(position))
         
     def _show_context_menu(self, index, global_position):
         """显示上下文菜单的通用方法"""
+        print(f"🔧 右键菜单触发 - 位置: {global_position}, 索引有效: {index.isValid()}")
+        
         menu = QMenu(self)
         
+        if self.archive_viewing_mode:
+            # 压缩包查看模式下的专用右键菜单
+            self._show_archive_context_menu(index, menu)
+        else:
+            # 普通文件系统模式下的右键菜单
+            self._show_filesystem_context_menu(index, menu)
+        
+        print(f"📋 菜单项数量: {len(menu.actions())}")
+        if menu.actions():  # 只有在有菜单项时才显示
+            print("🎯 显示菜单...")
+            menu.exec(global_position)
+        else:
+            print("❌ 没有菜单项，不显示菜单")
+    
+    def _show_archive_context_menu(self, index, menu):
+        """显示压缩包模式的上下文菜单"""
+        if index.isValid():
+            # 压缩包内文件/文件夹的右键菜单
+            item_type = index.data(Qt.UserRole)
+            file_path = index.data(Qt.UserRole + 1)
+            
+            if item_type == 'file':
+                # 文件右键菜单
+                open_action = QAction("打开", self)
+                open_action.setIcon(qta.icon('fa5s.file', color='#2196f3'))
+                open_action.triggered.connect(lambda: self.open_archive_file(file_path))
+                menu.addAction(open_action)
+                
+                menu.addSeparator()
+                
+                # 解压到... (暂时简化为解压到临时目录)
+                extract_action = QAction("解压到临时目录", self)
+                extract_action.setIcon(qta.icon('fa5s.download', color='#4caf50'))
+                extract_action.triggered.connect(lambda: self.extract_archive_file(file_path))
+                menu.addAction(extract_action)
+                
+            elif item_type == 'folder':
+                # 文件夹右键菜单
+                open_action = QAction("打开", self)
+                open_action.setIcon(qta.icon('fa5s.folder-open', color='#f57c00'))
+                open_action.triggered.connect(lambda: self.navigate_archive_directory(file_path))
+                menu.addAction(open_action)
+        else:
+            # 压缩包内空白处右键菜单
+            # 返回上级目录或退出压缩包
+            if self.archive_current_dir:
+                up_action = QAction("返回上级目录", self)
+                up_action.setIcon(qta.icon('fa5s.arrow-up', color='#2196f3'))
+                up_action.triggered.connect(self.go_up_directory)
+                menu.addAction(up_action)
+            
+            exit_action = QAction("退出压缩包查看", self)
+            exit_action.setIcon(qta.icon('fa5s.times', color='#f44336'))
+            exit_action.triggered.connect(self._exit_archive_mode)
+            menu.addAction(exit_action)
+    
+    def _show_filesystem_context_menu(self, index, menu):
+        """显示文件系统模式的上下文菜单"""
         # 获取当前所有选中的文件路径
         selected_paths = self.get_selected_paths()
+        print(f"📂 已选中路径: {selected_paths}")
         
-        if index.isValid() and selected_paths:
+        if index.isValid():
             file_path = self.file_model.filePath(index)
             is_dir = self.file_model.isDir(index)
+            print(f"📁 右键文件: {file_path}, 是文件夹: {is_dir}")
             
             # 如果右键的文件不在选中列表中，则只操作右键的文件
             if file_path not in selected_paths:
                 selected_paths = [file_path]
+                print(f"📝 更新选中列表为右键文件: {selected_paths}")
             
             # 判断选中项目的类型
             is_multiple = len(selected_paths) > 1
@@ -937,17 +1002,21 @@ class FileBrowser(QWidget):
             # 打开菜单项（只在单选时显示）
             if not is_multiple:
                 if is_dir:
-                    open_action = QAction(qta.icon('fa5s.folder-open', color='#f57c00'), "打开", self)
+                    open_action = QAction("打开", self)
+                    open_action.setIcon(qta.icon('fa5s.folder-open', color='#f57c00'))
                     open_action.triggered.connect(lambda: self.open_folder(file_path))
                 else:
-                    open_action = QAction(qta.icon('fa5s.file', color='#2196f3'), "打开", self)
+                    open_action = QAction("打开", self)
+                    open_action.setIcon(qta.icon('fa5s.file', color='#2196f3'))
                     open_action.triggered.connect(lambda: self.open_file(file_path))
                 menu.addAction(open_action)
                 menu.addSeparator()
             
             # 剪切、复制菜单项（支持多选）
-            cut_action = QAction(qta.icon('fa5s.cut', color='#ff9800'), "剪切", self)
-            copy_action = QAction(qta.icon('fa5s.copy', color='#2196f3'), "复制", self)
+            cut_action = QAction("剪切", self)
+            cut_action.setIcon(qta.icon('fa5s.cut', color='#ff9800'))
+            copy_action = QAction("复制", self)
+            copy_action.setIcon(qta.icon('fa5s.copy', color='#2196f3'))
                 
             cut_action.triggered.connect(lambda: self.cut_items(selected_paths))
             copy_action.triggered.connect(lambda: self.copy_items(selected_paths))
@@ -956,7 +1025,8 @@ class FileBrowser(QWidget):
             
             # 粘贴菜单项（只在单选文件夹时显示）
             if not is_multiple and is_dir and self.clipboard_items:
-                paste_action = QAction(qta.icon('fa5s.paste', color='#4caf50'), "粘贴", self)
+                paste_action = QAction("粘贴", self)
+                paste_action.setIcon(qta.icon('fa5s.paste', color='#4caf50'))
                 paste_action.triggered.connect(lambda: self.paste_items(file_path))
                 menu.addAction(paste_action)
             
@@ -964,59 +1034,73 @@ class FileBrowser(QWidget):
             
             # 重命名菜单项（只在单选时显示）
             if not is_multiple:
-                rename_action = QAction(qta.icon('fa5s.edit', color='#ff9800'), "重命名", self)
+                rename_action = QAction("重命名", self)
+                rename_action.setIcon(qta.icon('fa5s.edit', color='#ff9800'))
                 rename_action.triggered.connect(lambda: self.rename_file(file_path))
                 menu.addAction(rename_action)
             
             # 删除菜单项（支持多选）
-            delete_action = QAction(qta.icon('fa5s.trash', color='#f44336'), "删除", self)
+            delete_action = QAction("删除", self)
+            delete_action.setIcon(qta.icon('fa5s.trash', color='#f44336'))
             delete_action.triggered.connect(lambda: self.delete_files(selected_paths))
             menu.addAction(delete_action)
             
             # 只在单选文件夹时显示新建选项
             if not is_multiple and is_dir:
                 menu.addSeparator()
-                new_folder_action = QAction(qta.icon('fa5s.folder', color='#4caf50'), "新建文件夹", self)
+                new_folder_action = QAction("新建文件夹", self)
+                new_folder_action.setIcon(qta.icon('fa5s.folder', color='#4caf50'))
                 new_folder_action.triggered.connect(lambda: self.create_folder(file_path))
                 menu.addAction(new_folder_action)
                 
-                new_file_action = QAction(qta.icon('fa5s.file-alt', color='#4caf50'), "新建文件", self)
+                new_file_action = QAction("新建文件", self)
+                new_file_action.setIcon(qta.icon('fa5s.file-alt', color='#4caf50'))
                 new_file_action.triggered.connect(lambda: self.create_file(file_path))
                 menu.addAction(new_file_action)
+            
+            # 刷新选项
+            refresh_action = QAction("刷新", self)
+            refresh_action.setIcon(qta.icon('fa5s.sync-alt', color='#2196f3'))
+            refresh_action.triggered.connect(self.refresh_view)
+            menu.addAction(refresh_action)
             
         else:
             # 在空白处右键，在当前目录操作
             current_dir = self.get_current_root_path()
+            print(f"📂 空白处右键，当前目录: {current_dir}")
             if current_dir and os.path.exists(current_dir):
                 # 粘贴选项
                 if self.clipboard_items:
-                    paste_action = QAction(qta.icon('fa5s.paste', color='#4caf50'), "粘贴", self)
+                    paste_action = QAction("粘贴", self)
+                    paste_action.setIcon(qta.icon('fa5s.paste', color='#4caf50'))
                     paste_action.triggered.connect(lambda: self.paste_items(current_dir))
                     menu.addAction(paste_action)
                     menu.addSeparator()
                 
                 # 新建选项
-                new_folder_action = QAction(qta.icon('fa5s.folder', color='#4caf50'), "新建文件夹", self)
+                new_folder_action = QAction("新建文件夹", self)
+                new_folder_action.setIcon(qta.icon('fa5s.folder', color='#4caf50'))
                 new_folder_action.triggered.connect(lambda: self.create_folder(current_dir))
                 menu.addAction(new_folder_action)
                 
-                new_file_action = QAction(qta.icon('fa5s.file-alt', color='#4caf50'), "新建文件", self)
+                new_file_action = QAction("新建文件", self)
+                new_file_action.setIcon(qta.icon('fa5s.file-alt', color='#4caf50'))
                 new_file_action.triggered.connect(lambda: self.create_file(current_dir))
                 menu.addAction(new_file_action)
                 
                 menu.addSeparator()
                 
                 # 在资源管理器中打开当前目录
-                open_explorer_action = QAction(qta.icon('fa5s.external-link-alt', color='#2196f3'), "在资源管理器中打开", self)
+                open_explorer_action = QAction("在资源管理器中打开", self)
+                open_explorer_action.setIcon(qta.icon('fa5s.external-link-alt', color='#2196f3'))
                 open_explorer_action.triggered.connect(lambda: self.open_in_explorer(current_dir))
                 menu.addAction(open_explorer_action)
                 
                 # 刷新选项
-                refresh_action = QAction(qta.icon('fa5s.sync-alt', color='#2196f3'), "刷新", self)
+                refresh_action = QAction("刷新", self)
+                refresh_action.setIcon(qta.icon('fa5s.sync-alt', color='#2196f3'))
                 refresh_action.triggered.connect(self.refresh_view)
-        
-        if menu.actions():  # 只有在有菜单项时才显示
-            menu.exec(global_position)
+                menu.addAction(refresh_action)
 
     def open_file(self, file_path):
         """打开文件"""
@@ -1540,3 +1624,118 @@ class FileBrowser(QWidget):
         
         # 更新向上按钮状态
         self.update_up_button_state() 
+
+    def open_archive_file(self, file_path):
+        """解压并打开压缩包中的文件"""
+        try:
+            # 创建临时目录
+            temp_dir = tempfile.mkdtemp(prefix="gudazip_")
+            
+            # 从压缩包中解压指定文件
+            from ..core.archive_manager import ArchiveManager
+            archive_manager = ArchiveManager()
+            
+            success = archive_manager.extract_archive(
+                self.archive_path, 
+                temp_dir, 
+                selected_files=[file_path]
+            )
+            
+            if success:
+                # 构建临时文件的完整路径
+                temp_file_path = os.path.join(temp_dir, file_path)
+                
+                # 使用系统默认程序打开文件
+                if os.path.exists(temp_file_path):
+                    if sys.platform == "win32":
+                        os.startfile(temp_file_path)
+                    elif sys.platform == "darwin":  # macOS
+                        subprocess.call(["open", temp_file_path])
+                    else:  # Linux
+                        subprocess.call(["xdg-open", temp_file_path])
+                else:
+                    QMessageBox.warning(self, "错误", "无法找到解压后的文件")
+            else:
+                QMessageBox.warning(self, "错误", "无法解压文件")
+                # 清理临时目录
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开文件失败：{str(e)}")
+        
+    def open_archive_folder(self, folder_path):
+        """打开压缩包中的文件夹"""
+        if not self.archive_viewing_mode:
+            QMessageBox.warning(self, "错误", "当前不是压缩包查看模式")
+            return
+            
+        if not os.path.exists(folder_path):
+            QMessageBox.warning(self, "错误", "文件夹不存在")
+            return
+            
+        try:
+            # 打开文件夹
+            if sys.platform == "win32":
+                os.startfile(folder_path)
+            elif sys.platform == "darwin":  # macOS
+                subprocess.call(["open", folder_path])
+            else:  # Linux
+                subprocess.call(["xdg-open", folder_path])
+        except Exception as e:
+            QMessageBox.critical(self, "打开文件夹失败", f"无法打开文件夹: {str(e)}") 
+
+    def extract_archive_file(self, file_path):
+        """解压压缩包中的单个文件到临时目录"""
+        try:
+            # 创建临时目录
+            temp_dir = tempfile.mkdtemp(prefix="gudazip_extract_")
+            
+            # 从压缩包中解压指定文件
+            from ..core.archive_manager import ArchiveManager
+            archive_manager = ArchiveManager()
+            
+            success = archive_manager.extract_archive(
+                self.archive_path, 
+                temp_dir, 
+                selected_files=[file_path]
+            )
+            
+            if success:
+                # 构建解压后文件的完整路径
+                extracted_file_path = os.path.join(temp_dir, file_path)
+                
+                if os.path.exists(extracted_file_path):
+                    # 在资源管理器中显示文件
+                    if sys.platform == "win32":
+                        # Windows: 选中文件并打开资源管理器
+                        subprocess.run(['explorer', '/select,', extracted_file_path])
+                    else:
+                        # 其他系统：打开包含文件夹
+                        parent_dir = os.path.dirname(extracted_file_path)
+                        if sys.platform == "darwin":  # macOS
+                            subprocess.call(["open", parent_dir])
+                        else:  # Linux
+                            subprocess.call(["xdg-open", parent_dir])
+                    
+                    QMessageBox.information(self, "解压成功", f"文件已解压到临时目录：\n{extracted_file_path}")
+                else:
+                    QMessageBox.warning(self, "错误", "无法找到解压后的文件")
+            else:
+                QMessageBox.warning(self, "错误", "解压文件失败")
+                # 清理临时目录
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"解压文件失败：{str(e)}")
+    
+    def _exit_archive_mode(self):
+        """退出压缩包查看模式"""
+        # 查找主窗口并调用退出方法
+        parent_widget = self.parent()
+        while parent_widget:
+            if hasattr(parent_widget, 'exit_archive_mode'):
+                parent_widget.exit_archive_mode()
+                return
+            parent_widget = parent_widget.parent()
+        # 如果找不到主窗口，直接退出压缩包模式
+        self.exit_archive_mode() 
