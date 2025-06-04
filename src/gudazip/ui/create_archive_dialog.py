@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
+from ..core.permission_manager import PermissionManager
 
 
 class CreateArchiveWorker(QThread):
@@ -323,7 +324,7 @@ class CreateArchiveDialog(QDialog):
                 
         # 在主线程中检查权限
         all_paths = self.selected_files + [archive_path]
-        if not self.archive_manager.request_admin_if_needed(all_paths, "创建压缩包"):
+        if not PermissionManager.request_admin_if_needed(all_paths, "创建压缩包"):
             # 用户拒绝权限申请或权限申请失败
             return
                 
