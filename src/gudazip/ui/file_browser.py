@@ -39,6 +39,9 @@ if sys.platform == "win32":
 else:
     HAS_WIN32 = False
 
+# 导入信号管理器
+from ..core.signal_manager import get_signal_manager
+
 
 class EnhancedIconProvider(QFileIconProvider):
     """增强的图标提供器，专门处理快捷方式和获取高质量图标"""
@@ -140,6 +143,9 @@ class FileBrowser(QWidget):
         self.archive_path = None  # 当前压缩包路径
         self.archive_current_dir = ""  # 压缩包内当前目录
         self.archive_file_list = []  # 压缩包文件列表
+        
+        # 初始化信号管理器
+        self.signal_manager = get_signal_manager(debug_mode=True)  # 开启调试模式
         
         # 设置焦点策略，使其能接收键盘事件
         self.setFocusPolicy(Qt.StrongFocus)
@@ -686,11 +692,14 @@ class FileBrowser(QWidget):
             
             if not path_found:
                 # 如果路径不在预设列表中，直接设置文本
-                # 临时断开信号连接，避免触发路径变化事件
-                self.path_combo.currentTextChanged.disconnect(self.handle_location_selection)
-                self.path_combo.setCurrentText(path)
-                self.path_combo.currentTextChanged.connect(self.handle_location_selection)
-                
+                # 使用信号管理器安全地设置文本，避免触发路径变化事件
+                with self.signal_manager.block_signal(
+                    self.path_combo.currentTextChanged,
+                    self.handle_location_selection,
+                    "filesystem_path_update"
+                ):
+                    self.path_combo.setCurrentText(path)
+            
             # 更新向上按钮状态
             self.update_up_button_state()
             
@@ -768,10 +777,15 @@ class FileBrowser(QWidget):
             self.force_navigate_to_path(path_text)
         else:
             QMessageBox.warning(self, "路径错误", f"路径不存在或不是文件夹: {path_text}")
-            # 恢复为当前路径
+            # 恢复为当前路径（使用信号管理器保护）
             current_path = self.get_current_root_path()
             if current_path:
-                self.path_combo.lineEdit().setText(current_path)
+                with self.signal_manager.block_signal(
+                    self.path_combo.currentTextChanged,
+                    self.handle_location_selection,
+                    "path_input_recovery"
+                ):
+                    self.path_combo.lineEdit().setText(current_path)
     
     def go_up_directory(self):
         """返回上一级目录"""
@@ -1549,12 +1563,19 @@ class FileBrowser(QWidget):
         self.display_archive_directory_content()
         # 更新向上按钮状态
         self.update_up_button_state()
-        # 更新路径显示
+        # 更新路径显示（使用信号管理器保护）
         if directory:
             display_path = f"{os.path.basename(self.archive_path)}/{directory}"
         else:
             display_path = os.path.basename(self.archive_path)
-        self.path_combo.lineEdit().setText(display_path)
+        
+        # 使用信号管理器安全地更新路径显示，避免触发handle_location_selection
+        with self.signal_manager.block_signal(
+            self.path_combo.currentTextChanged,
+            self.handle_location_selection,
+            "archive_navigation_update"
+        ):
+            self.path_combo.lineEdit().setText(display_path)
     
     def display_archive_directory_content(self):
         """显示压缩包当前目录的内容"""
@@ -1710,11 +1731,13 @@ class FileBrowser(QWidget):
             
             # 更新路径显示
             if hasattr(self, 'path_combo') and self.path_combo:
-                # 临时断开信号，避免触发handle_location_selection
-                self.path_combo.currentTextChanged.disconnect(self.handle_location_selection)
-                self.path_combo.lineEdit().setText(os.path.basename(archive_path))
-                # 重新连接信号
-                self.path_combo.currentTextChanged.connect(self.handle_location_selection)
+                # 使用信号管理器安全地更新路径，避免触发handle_location_selection
+                with self.signal_manager.block_signal(
+                    self.path_combo.currentTextChanged, 
+                    self.handle_location_selection,
+                    "archive_path_update"
+                ):
+                    self.path_combo.lineEdit().setText(os.path.basename(archive_path))
             
         except Exception as e:
             print(f"进入压缩包模式失败: {e}")
@@ -2065,20 +2088,20 @@ class FileBrowser(QWidget):
     
     def update_path_combo_display(self, path):
         """更新路径下拉框显示 - 独立的显示更新逻辑"""
-        # 临时断开信号，避免递归触发
-        self.path_combo.currentTextChanged.disconnect(self.handle_location_selection)
-        
-        # 检查是否在预设列表中
-        path_found = False
-        for i in range(self.path_combo.count()):
-            if self.path_combo.itemData(i) == path:
-                self.path_combo.setCurrentIndex(i)
-                path_found = True
-                break
-        
-        if not path_found:
-            # 如果路径不在预设列表中，直接设置文本
-            self.path_combo.setCurrentText(path)
-        
-        # 重新连接信号
-        self.path_combo.currentTextChanged.connect(self.handle_location_selection)
+        # 使用信号管理器安全地更新显示，避免递归触发
+        with self.signal_manager.block_signal(
+            self.path_combo.currentTextChanged,
+            self.handle_location_selection,
+            "combo_display_update"
+        ):
+            # 检查是否在预设列表中
+            path_found = False
+            for i in range(self.path_combo.count()):
+                if self.path_combo.itemData(i) == path:
+                    self.path_combo.setCurrentIndex(i)
+                    path_found = True
+                    break
+            
+            if not path_found:
+                # 如果路径不在预设列表中，直接设置文本
+                self.path_combo.setCurrentText(path)
