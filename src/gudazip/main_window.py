@@ -22,6 +22,7 @@ from .ui.create_archive_dialog import CreateArchiveDialog
 from .ui.extract_archive_dialog import ExtractArchiveDialog
 from .core.archive_manager import ArchiveManager
 from .core.error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
+from .core.state_manager import StateManager, StateScope, StatePersistenceType, get_state_manager
 
 
 class MainWindow(QMainWindow):
@@ -31,6 +32,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.archive_manager = ArchiveManager(self)
         self.error_manager = get_error_manager(self)
+        self.state_manager = get_state_manager(self)
         
         self.init_ui()
         self.setup_actions()
@@ -38,29 +40,40 @@ class MainWindow(QMainWindow):
         self.setup_toolbar()
         self.setup_statusbar()
         
+        # 恢复窗口状态
+        self.restore_window_state()
+        
         # 添加刷新动作到主窗口，使F5快捷键在整个窗口中生效
         self.addAction(self.action_refresh)
         
     def init_ui(self):
         """初始化用户界面"""
-        self.setWindowTitle("GudaZip - Python桌面压缩管理器")
-        self.setMinimumSize(1000, 700)
+        self.setWindowTitle("GudaZip - 压缩包管理工具")
+        self.setWindowIcon(QIcon("assets/icon.png"))
         
-        # 设置窗口图标
-        self.set_window_icon()
+        # 从状态管理器获取窗口几何信息
+        saved_geometry = self.state_manager.get_state("window.geometry")
+        if saved_geometry:
+            self.restoreGeometry(saved_geometry)
+        else:
+            self.setGeometry(100, 100, 1200, 800)
         
-        # 创建中央部件
+        # 检查是否应该最大化
+        if self.state_manager.get_state("window.maximized", False):
+            self.showMaximized()
+        
+        # 创建中央窗口部件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
         # 创建主布局
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # 只使用左侧文件系统导航，占据整个空间
-        self.file_browser = FileBrowser()
-        main_layout.addWidget(self.file_browser)
+        # 创建文件浏览器
+        self.file_browser = FileBrowser(self)
+        layout.addWidget(self.file_browser)
         
         # 连接信号
         self.file_browser.fileSelected.connect(self.on_file_selected)
@@ -503,4 +516,100 @@ class MainWindow(QMainWindow):
             # 强制重置状态
             self.action_back_to_filesystem.setEnabled(False)
             self.path_label.setText("就绪")
+    
+    def restore_window_state(self):
+        """恢复窗口状态"""
+        try:
+            # 恢复窗口几何信息
+            geometry = self.state_manager.get_state("window.geometry")
+            if geometry:
+                self.restoreGeometry(geometry)
+            
+            # 恢复最大化状态
+            maximized = self.state_manager.get_state("window.maximized", False)
+            if maximized:
+                self.showMaximized()
+            
+            # 恢复分割器状态（如果有的话）
+            splitter_state = self.state_manager.get_state("window.splitter_state")
+            if splitter_state and hasattr(self, 'splitter'):
+                self.splitter.restoreState(splitter_state)
+                
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "restore_window_state"},
+                category=ErrorCategory.APP_CONFIGURATION,
+                show_dialog=False
+            )
+    
+    def save_window_state(self):
+        """保存窗口状态"""
+        try:
+            # 保存窗口几何信息
+            self.state_manager.set_state(
+                "window.geometry", 
+                self.saveGeometry(),
+                scope=StateScope.WINDOW,
+                persistence_type=StatePersistenceType.QSETTINGS,
+                description="窗口几何信息"
+            )
+            
+            # 保存最大化状态
+            self.state_manager.set_state(
+                "window.maximized", 
+                self.isMaximized(),
+                scope=StateScope.WINDOW,
+                persistence_type=StatePersistenceType.QSETTINGS,
+                description="窗口是否最大化"
+            )
+            
+            # 保存分割器状态（如果有的话）
+            if hasattr(self, 'splitter'):
+                self.state_manager.set_state(
+                    "window.splitter_state", 
+                    self.splitter.saveState(),
+                    scope=StateScope.WINDOW,
+                    persistence_type=StatePersistenceType.QSETTINGS,
+                    description="分割器状态"
+                )
+            
+            # 保存所有状态到文件
+            self.state_manager.save_all_states()
+            
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "save_window_state"},
+                category=ErrorCategory.APP_CONFIGURATION,
+                show_dialog=False
+            )
+
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        try:
+            # 保存窗口状态
+            self.save_window_state()
+            
+            # 记录程序退出时间
+            from datetime import datetime
+            self.state_manager.set_state(
+                "app.last_close_time",
+                datetime.now().isoformat(),
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.JSON,
+                description="程序最后关闭时间"
+            )
+            
+            # 接受关闭事件
+            event.accept()
+            
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "close_event"},
+                category=ErrorCategory.APP_INTERNAL,
+                show_dialog=False
+            )
+            event.accept()  # 即使出错也要关闭
     

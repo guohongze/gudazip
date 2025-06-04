@@ -45,6 +45,7 @@ from ..core.signal_manager import get_signal_manager
 from ..core.file_operation_manager import FileOperationManager
 from ..core.archive_operation_manager import ArchiveOperationManager
 from ..core.error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
+from ..core.state_manager import StateManager, StateScope, StatePersistenceType, get_state_manager
 from .context_menu_manager import ContextMenuManager
 from .toolbar_widget import ToolbarWidget
 from .file_view_widget import FileViewWidget
@@ -66,25 +67,32 @@ class FileBrowser(QWidget):
         
         # 压缩包查看模式相关
         self.archive_viewing_mode = False  # 是否处于压缩包查看模式
-        self.archive_model = None  # 压缩包内容模型
-        self.archive_path = None  # 当前压缩包路径
-        self.archive_current_dir = ""  # 压缩包内当前目录
-        self.archive_file_list = []  # 压缩包文件列表
+        self.current_archive_path = ""  # 当前查看的压缩包路径
+        self.archive_current_dir = ""   # 压缩包内当前目录
         
         # 初始化管理器
-        self.signal_manager = get_signal_manager(debug_mode=True)
+        self.signal_manager = get_signal_manager(self)
         self.file_operation_manager = FileOperationManager(self)
         self.archive_operation_manager = ArchiveOperationManager(self)
-        self.context_menu_manager = ContextMenuManager(self)
         self.error_manager = get_error_manager(self)
+        self.state_manager = get_state_manager(self)
         
+        # 初始化UI组件
+        self.init_ui()
+        
+        # 连接组件间的信号
+        self.connect_signals()
+        
+        # 恢复浏览器状态
+        self.restore_browser_state()
+        
+    def connect_signals(self):
+        """连接组件间的信号"""
         # 连接操作管理器的信号
         self._connect_operation_signals()
         
-        # 设置焦点策略，使其能接收键盘事件
-        self.setFocusPolicy(Qt.StrongFocus)
-        
-        self.init_ui()
+        # 初始化右键菜单管理器
+        self.context_menu_manager = ContextMenuManager(self)
         
     def _connect_operation_signals(self):
         """连接操作管理器的信号"""
@@ -485,25 +493,25 @@ class FileBrowser(QWidget):
         """解压并打开压缩包中的文件"""
         if not self.archive_viewing_mode:
             return
-        self.archive_operation_manager.open_archive_file(self.archive_path, file_path)
+        self.archive_operation_manager.open_archive_file(self.current_archive_path, file_path)
         
     def extract_archive_file(self, file_path):
         """解压压缩包中的单个文件到临时目录"""
         if not self.archive_viewing_mode:
             return
-        self.archive_operation_manager.show_file_in_explorer(self.archive_path, file_path)
+        self.archive_operation_manager.show_file_in_explorer(self.current_archive_path, file_path)
 
     def rename_archive_file(self, file_path, current_name):
         """重命名压缩包内的文件或文件夹"""
         if not self.archive_viewing_mode:
             return
-        self.archive_operation_manager.rename_archive_file(self.archive_path, file_path)
+        self.archive_operation_manager.rename_archive_file(self.current_archive_path, file_path)
 
     def delete_archive_file(self, file_path):
         """删除压缩包内的文件"""
         if not self.archive_viewing_mode:
             return
-        self.archive_operation_manager.delete_archive_file(self.archive_path, file_path)
+        self.archive_operation_manager.delete_archive_file(self.current_archive_path, file_path)
 
     def copy_archive_items(self, file_paths):
         """复制压缩包内的文件到剪贴板"""
@@ -517,15 +525,15 @@ class FileBrowser(QWidget):
         """在资源管理器中打开当前压缩包所在文件夹"""
         if not self.archive_viewing_mode:
             return
-        self.archive_operation_manager.open_archive_folder_in_explorer(self.archive_path)
+        self.archive_operation_manager.open_archive_folder_in_explorer(self.current_archive_path)
 
     def refresh_archive_view(self):
         """刷新压缩包内容显示"""
-        if not self.archive_viewing_mode or not self.archive_path:
+        if not self.archive_viewing_mode or not self.current_archive_path:
             return
         
         # 使用压缩包操作管理器重新获取文件列表
-        result = self.archive_operation_manager.list_archive_contents(self.archive_path)
+        result = self.archive_operation_manager.list_archive_contents(self.current_archive_path)
         if result.success:
             # 转换回原来的格式以兼容现有代码
             self.archive_file_list = [file_info.to_dict() for file_info in result.data]
@@ -560,7 +568,7 @@ class FileBrowser(QWidget):
         """进入压缩包查看模式"""
         try:
             self.archive_viewing_mode = True
-            self.archive_path = archive_path
+            self.current_archive_path = archive_path
             self.archive_file_list = archive_file_list
             self.archive_current_dir = ""
             
@@ -592,7 +600,7 @@ class FileBrowser(QWidget):
     def exit_archive_mode(self):
         """退出压缩包查看模式"""
         self.archive_viewing_mode = False
-        self.archive_path = None
+        self.current_archive_path = ""
         self.archive_file_list = []
         self.archive_current_dir = ""
         self.archive_model = None
@@ -643,7 +651,7 @@ class FileBrowser(QWidget):
         """强制退出压缩包模式 - 独立的退出逻辑"""
         # 重置所有压缩包相关状态
         self.archive_viewing_mode = False
-        self.archive_path = None
+        self.current_archive_path = ""
         self.archive_file_list = []
         self.archive_current_dir = ""
         self.archive_model = None
@@ -725,9 +733,9 @@ class FileBrowser(QWidget):
         self.update_up_button_state()
         # 更新路径显示（使用ToolbarWidget的接口和信号管理器保护）
         if directory:
-            display_path = f"{os.path.basename(self.archive_path)}/{directory}"
+            display_path = f"{os.path.basename(self.current_archive_path)}/{directory}"
         else:
-            display_path = os.path.basename(self.archive_path)
+            display_path = os.path.basename(self.current_archive_path)
         
         # 使用ToolbarWidget的接口安全地更新路径显示，避免触发handle_location_selection
         self.toolbar.update_path_display(
@@ -889,4 +897,250 @@ class FileBrowser(QWidget):
             QMessageBox.information(
                 self, "功能提示", 
                 "在压缩包中创建文件夹需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
+            )
+
+    def restore_browser_state(self):
+        """恢复文件浏览器状态"""
+        try:
+            # 恢复视图模式
+            saved_view_mode = self.state_manager.get_state("browser.view_mode", "详细信息")
+            self.current_view_mode = saved_view_mode
+            self.toolbar.view_toggle_requested.emit(saved_view_mode)
+            
+            # 恢复当前路径
+            saved_path = self.state_manager.get_state("browser.current_path", "")
+            if saved_path and os.path.exists(saved_path):
+                self.file_view.set_current_path(saved_path)
+            
+            # 恢复显示隐藏文件设置
+            show_hidden = self.state_manager.get_state("browser.show_hidden_files", False)
+            self.file_view.set_show_hidden_files(show_hidden)
+            
+            # 恢复排序设置
+            sort_column = self.state_manager.get_state("browser.sort_column", 0)
+            sort_order = self.state_manager.get_state("browser.sort_order", 0)
+            self.file_view.set_sort_settings(sort_column, sort_order)
+            
+            # 恢复压缩包状态
+            archive_mode = self.state_manager.get_state("archive.viewing_mode", False)
+            if archive_mode:
+                archive_path = self.state_manager.get_state("archive.current_path", "")
+                archive_dir = self.state_manager.get_state("archive.current_dir", "")
+                if archive_path and os.path.exists(archive_path):
+                    self.archive_viewing_mode = archive_mode
+                    self.current_archive_path = archive_path
+                    self.archive_current_dir = archive_dir
+                    self.file_view.set_archive_mode(True, archive_path, archive_dir)
+            
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "restore_browser_state"},
+                category=ErrorCategory.APP_CONFIGURATION,
+                show_dialog=False
+            )
+    
+    def save_browser_state(self):
+        """保存文件浏览器状态"""
+        try:
+            # 保存视图模式
+            self.state_manager.set_state(
+                "browser.view_mode",
+                self.current_view_mode,
+                scope=StateScope.USER,
+                persistence_type=StatePersistenceType.JSON,
+                description="文件视图模式"
+            )
+            
+            # 保存当前路径
+            current_path = self.file_view.get_current_path()
+            self.state_manager.set_state(
+                "browser.current_path",
+                current_path,
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.JSON,
+                description="当前浏览路径"
+            )
+            
+            # 保存显示隐藏文件设置
+            show_hidden = self.file_view.get_show_hidden_files()
+            self.state_manager.set_state(
+                "browser.show_hidden_files",
+                show_hidden,
+                scope=StateScope.USER,
+                persistence_type=StatePersistenceType.JSON,
+                description="显示隐藏文件"
+            )
+            
+            # 保存排序设置
+            sort_column, sort_order = self.file_view.get_sort_settings()
+            self.state_manager.set_state(
+                "browser.sort_column",
+                sort_column,
+                scope=StateScope.USER,
+                persistence_type=StatePersistenceType.JSON,
+                description="排序列"
+            )
+            self.state_manager.set_state(
+                "browser.sort_order",
+                sort_order,
+                scope=StateScope.USER,
+                persistence_type=StatePersistenceType.JSON,
+                description="排序顺序"
+            )
+            
+            # 保存压缩包状态
+            self.state_manager.set_state(
+                "archive.viewing_mode",
+                self.archive_viewing_mode,
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.MEMORY,
+                description="压缩包查看模式"
+            )
+            self.state_manager.set_state(
+                "archive.current_path",
+                self.current_archive_path,
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.MEMORY,
+                description="当前压缩包路径"
+            )
+            self.state_manager.set_state(
+                "archive.current_dir",
+                self.archive_current_dir,
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.MEMORY,
+                description="压缩包内当前目录"
+            )
+            
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "save_browser_state"},
+                category=ErrorCategory.APP_CONFIGURATION,
+                show_dialog=False
+            )
+
+    def handle_path_changed(self, path):
+        """处理路径变更"""
+        try:
+            # 保存当前路径到状态管理器
+            self.state_manager.set_state(
+                "browser.current_path",
+                path,
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.JSON,
+                notify=False  # 不发送信号避免循环
+            )
+            
+            # 更新导航历史
+            nav_history = self.state_manager.get_state("history.navigation", [])
+            if not nav_history or nav_history[-1] != path:
+                nav_history.append(path)
+                # 限制历史记录数量
+                if len(nav_history) > 50:
+                    nav_history = nav_history[-50:]
+                self.state_manager.set_state(
+                    "history.navigation",
+                    nav_history,
+                    scope=StateScope.SESSION,
+                    persistence_type=StatePersistenceType.MEMORY,
+                    notify=False
+                )
+            
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "handle_path_changed", "path": path},
+                category=ErrorCategory.APP_INTERNAL,
+                show_dialog=False
+            )
+
+    def enter_archive_viewing_mode(self, archive_path):
+        """进入压缩包查看模式"""
+        try:
+            self.archive_viewing_mode = True
+            self.current_archive_path = archive_path
+            self.archive_current_dir = ""
+            
+            # 更新状态管理器
+            self.state_manager.set_state(
+                "archive.viewing_mode",
+                True,
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.MEMORY
+            )
+            self.state_manager.set_state(
+                "archive.current_path",
+                archive_path,
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.MEMORY
+            )
+            self.state_manager.set_state(
+                "archive.current_dir",
+                "",
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.MEMORY
+            )
+            
+            # 更新最近打开的压缩包列表
+            recent_archives = self.state_manager.get_state("recent.archives", [])
+            if archive_path in recent_archives:
+                recent_archives.remove(archive_path)
+            recent_archives.insert(0, archive_path)
+            # 限制列表长度
+            if len(recent_archives) > 10:
+                recent_archives = recent_archives[:10]
+            self.state_manager.set_state(
+                "recent.archives",
+                recent_archives,
+                scope=StateScope.USER,
+                persistence_type=StatePersistenceType.JSON
+            )
+            
+            # 启用压缩包模式
+            self.file_view.set_archive_mode(True, archive_path, "")
+            
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "enter_archive_viewing_mode", "archive_path": archive_path},
+                category=ErrorCategory.APP_INTERNAL
+            )
+    
+    def exit_archive_viewing_mode(self):
+        """退出压缩包查看模式"""
+        try:
+            self.archive_viewing_mode = False
+            self.current_archive_path = ""
+            self.archive_current_dir = ""
+            
+            # 更新状态管理器
+            self.state_manager.set_state(
+                "archive.viewing_mode",
+                False,
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.MEMORY
+            )
+            self.state_manager.set_state(
+                "archive.current_path",
+                "",
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.MEMORY
+            )
+            self.state_manager.set_state(
+                "archive.current_dir",
+                "",
+                scope=StateScope.SESSION,
+                persistence_type=StatePersistenceType.MEMORY
+            )
+            
+            # 禁用压缩包模式
+            self.file_view.set_archive_mode(False, "", "")
+            
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "exit_archive_viewing_mode"},
+                category=ErrorCategory.APP_INTERNAL,
+                show_dialog=False
             )
