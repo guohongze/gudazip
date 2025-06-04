@@ -203,4 +203,127 @@ class ZipHandler:
             # 检查目标路径是否在解压目录内
             return target_path.startswith(extract_to)
         except Exception:
-            return False 
+            return False
+    
+    def rename_file_in_archive(self, archive_path: str, old_name: str, new_name: str) -> bool:
+        """重命名ZIP压缩包内的文件"""
+        try:
+            if not os.path.exists(archive_path):
+                raise FileNotFoundError(f"压缩包不存在：{archive_path}")
+            
+            # 检查权限
+            if not PermissionManager.request_admin_if_needed([archive_path], "修改压缩包"):
+                return False
+            
+            # 创建临时文件
+            temp_path = archive_path + '.tmp'
+            
+            with zipfile.ZipFile(archive_path, 'r') as old_zip:
+                with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
+                    # 遍历原压缩包中的所有文件
+                    for item in old_zip.infolist():
+                        # 读取文件数据
+                        data = old_zip.read(item.filename)
+                        
+                        # 确定新的文件名
+                        if item.filename == old_name:
+                            # 这是要重命名的文件
+                            new_info = zipfile.ZipInfo(new_name)
+                            new_info.date_time = item.date_time
+                            new_info.compress_type = item.compress_type
+                            new_info.flag_bits = item.flag_bits
+                            new_info.external_attr = item.external_attr
+                            new_zip.writestr(new_info, data)
+                        elif item.filename.startswith(old_name + '/'):
+                            # 这是要重命名文件夹内的文件
+                            new_filename = item.filename.replace(old_name + '/', new_name + '/', 1)
+                            new_info = zipfile.ZipInfo(new_filename)
+                            new_info.date_time = item.date_time
+                            new_info.compress_type = item.compress_type
+                            new_info.flag_bits = item.flag_bits
+                            new_info.external_attr = item.external_attr
+                            new_zip.writestr(new_info, data)
+                        else:
+                            # 其他文件保持不变
+                            new_zip.writestr(item, data)
+            
+            # 替换原文件
+            import shutil
+            shutil.move(temp_path, archive_path)
+            return True
+            
+        except Exception as e:
+            # 清理临时文件
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+            raise Exception(f"重命名失败: {e}")
+    
+    def delete_file_from_archive(self, archive_path: str, file_name: str) -> bool:
+        """从ZIP压缩包中删除文件"""
+        try:
+            if not os.path.exists(archive_path):
+                raise FileNotFoundError(f"压缩包不存在：{archive_path}")
+            
+            # 检查权限
+            if not PermissionManager.request_admin_if_needed([archive_path], "修改压缩包"):
+                return False
+            
+            # 创建临时文件
+            temp_path = archive_path + '.tmp'
+            
+            with zipfile.ZipFile(archive_path, 'r') as old_zip:
+                with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
+                    # 遍历原压缩包中的所有文件
+                    for item in old_zip.infolist():
+                        # 跳过要删除的文件
+                        if item.filename == file_name:
+                            continue
+                        # 跳过要删除文件夹内的所有文件
+                        if item.filename.startswith(file_name + '/'):
+                            continue
+                        
+                        # 保留其他文件
+                        data = old_zip.read(item.filename)
+                        new_zip.writestr(item, data)
+            
+            # 替换原文件
+            import shutil
+            shutil.move(temp_path, archive_path)
+            return True
+            
+        except Exception as e:
+            # 清理临时文件
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+            raise Exception(f"删除失败: {e}")
+    
+    def list_archive_contents(self, archive_path: str) -> List[Dict[str, Any]]:
+        """获取压缩包文件列表（用于刷新显示）"""
+        try:
+            if not os.path.exists(archive_path):
+                raise FileNotFoundError(f"压缩包不存在：{archive_path}")
+            
+            files = []
+            with zipfile.ZipFile(archive_path, 'r') as zf:
+                for info in zf.infolist():
+                    if not info.filename.endswith('/'):  # 不是目录
+                        file_info = {
+                            'path': info.filename,
+                            'size': info.file_size,
+                            'compressed_size': info.compress_size,
+                            'modified_time': self._convert_time(info.date_time),
+                            'crc': info.CRC,
+                            'is_encrypted': bool(info.flag_bits & 0x1)
+                        }
+                        files.append(file_info)
+            
+            return files
+            
+        except Exception as e:
+            raise Exception(f"读取压缩包内容失败: {e}") 

@@ -1851,27 +1851,51 @@ class FileBrowser(QWidget):
                 QMessageBox.warning(self, "错误", "名称不能为空")
                 return
             
-            # 显示提示信息（压缩包修改需要重新创建）
-            QMessageBox.information(
-                self, "功能提示", 
-                "重命名压缩包内文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
-            )
+            # 计算新的文件路径
+            if self.archive_current_dir:
+                new_file_path = f"{self.archive_current_dir}/{new_name}"
+            else:
+                new_file_path = new_name
+            
+            try:
+                # 使用ArchiveManager重命名文件
+                from ..core.archive_manager import ArchiveManager
+                archive_manager = ArchiveManager()
+                
+                success = archive_manager.rename_file_in_archive(
+                    self.archive_path, 
+                    file_path, 
+                    new_file_path
+                )
+                
+                if success:
+                    # 重新刷新压缩包内容显示
+                    self.refresh_archive_view()
+                    QMessageBox.information(self, "成功", f"文件已重命名为: {new_name}")
+                else:
+                    QMessageBox.warning(self, "重命名失败", "无法重命名该文件")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "重命名失败", f"重命名操作失败：{str(e)}")
     
-    def delete_archive_file(self, file_path):
-        """删除压缩包内的文件"""
-        reply = QMessageBox.question(
-            self, "确认删除", 
-            f"确定要从压缩包中删除 '{os.path.basename(file_path)}' 吗？\n注意：这需要重新创建压缩包。",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+    def refresh_archive_view(self):
+        """刷新压缩包内容显示"""
+        if not self.archive_viewing_mode or not self.archive_path:
+            return
         
-        if reply == QMessageBox.Yes:
-            # 显示提示信息（压缩包修改需要重新创建）
-            QMessageBox.information(
-                self, "功能提示", 
-                "从压缩包中删除文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
-            )
+        try:
+            # 重新读取压缩包文件列表
+            from ..core.archive_manager import ArchiveManager
+            archive_manager = ArchiveManager()
+            
+            file_list = archive_manager.list_archive_contents(self.archive_path)
+            if file_list:
+                self.archive_file_list = file_list
+                # 重新显示当前目录内容
+                self.display_archive_directory_content()
+            
+        except Exception as e:
+            print(f"刷新压缩包视图失败: {e}")
     
     def create_archive_folder(self, parent_path=None):
         """在压缩包中创建新文件夹"""
@@ -1945,3 +1969,33 @@ class FileBrowser(QWidget):
                 self, "功能提示", 
                 "向压缩包中添加文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
             )
+
+    def delete_archive_file(self, file_path):
+        """删除压缩包内的文件"""
+        reply = QMessageBox.question(
+            self, "确认删除", 
+            f"确定要从压缩包中删除 '{os.path.basename(file_path)}' 吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # 使用ArchiveManager删除文件
+                from ..core.archive_manager import ArchiveManager
+                archive_manager = ArchiveManager()
+                
+                success = archive_manager.delete_file_from_archive(
+                    self.archive_path, 
+                    file_path
+                )
+                
+                if success:
+                    # 重新刷新压缩包内容显示
+                    self.refresh_archive_view()
+                    QMessageBox.information(self, "成功", f"文件已删除: {os.path.basename(file_path)}")
+                else:
+                    QMessageBox.warning(self, "删除失败", "无法删除该文件")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "删除失败", f"删除操作失败：{str(e)}")

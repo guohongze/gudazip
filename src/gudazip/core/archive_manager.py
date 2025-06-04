@@ -147,4 +147,57 @@ class ArchiveManager:
             return info is not None
             
         except Exception:
-            return False 
+            return False
+    
+    def rename_file_in_archive(self, archive_path: str, old_name: str, new_name: str) -> bool:
+        """重命名压缩包内的文件"""
+        try:
+            if not self.is_archive_file(archive_path):
+                raise ValueError("不支持的压缩文件格式")
+            
+            _, ext = os.path.splitext(archive_path.lower())
+            handler = self.handlers.get(ext)
+            
+            if handler and hasattr(handler, 'rename_file_in_archive'):
+                return handler.rename_file_in_archive(archive_path, old_name, new_name)
+            else:
+                raise ValueError(f"不支持在 {ext} 格式中重命名文件")
+                
+        except Exception as e:
+            raise Exception(f"重命名失败: {e}")
+    
+    def delete_file_from_archive(self, archive_path: str, file_name: str) -> bool:
+        """从压缩包中删除文件"""
+        try:
+            if not self.is_archive_file(archive_path):
+                raise ValueError("不支持的压缩文件格式")
+            
+            _, ext = os.path.splitext(archive_path.lower())
+            handler = self.handlers.get(ext)
+            
+            if handler and hasattr(handler, 'delete_file_from_archive'):
+                return handler.delete_file_from_archive(archive_path, file_name)
+            else:
+                raise ValueError(f"不支持在 {ext} 格式中删除文件")
+                
+        except Exception as e:
+            raise Exception(f"删除失败: {e}")
+    
+    def list_archive_contents(self, archive_path: str) -> List[Dict[str, Any]]:
+        """获取压缩包文件列表"""
+        try:
+            if not self.is_archive_file(archive_path):
+                raise ValueError("不支持的压缩文件格式")
+            
+            _, ext = os.path.splitext(archive_path.lower())
+            handler = self.handlers.get(ext)
+            
+            if handler and hasattr(handler, 'list_archive_contents'):
+                return handler.list_archive_contents(archive_path)
+            else:
+                # 如果没有专门的方法，使用get_archive_info
+                info = handler.get_archive_info(archive_path)
+                return info.get('files', [])
+                
+        except Exception as e:
+            raise Exception(f"获取文件列表失败: {e}") 
