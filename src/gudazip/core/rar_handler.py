@@ -155,4 +155,4 @@ class RarHandler:
     # RAR格式只支持读取，不支持创建和修改
     def create_archive(self, *args, **kwargs):
         """RAR格式不支持创建"""
-        raise Exception("RAR格式不支持创建新的压缩包") 
+        raise Exception("RAR格式不支持创建新的压缩包")

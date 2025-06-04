@@ -1922,13 +1922,15 @@ class FileBrowser(QWidget):
             QMessageBox.warning(self, "错误", "压缩包路径无效")
             return
         
+        # 获取压缩包所在的文件夹
         archive_dir = os.path.dirname(self.archive_path)
+        
         try:
             if sys.platform == "win32":
-                # Windows: 选中压缩包文件并打开资源管理器
-                subprocess.run(['explorer', '/select,', self.archive_path])
+                # Windows: 直接打开文件夹（与普通模式保持一致）
+                os.startfile(archive_dir)
             elif sys.platform == "darwin":  # macOS
-                subprocess.call(["open", "-R", self.archive_path])
+                subprocess.call(["open", archive_dir])
             else:  # Linux
                 subprocess.call(["xdg-open", archive_dir])
         except Exception as e:

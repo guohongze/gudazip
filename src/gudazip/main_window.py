@@ -326,7 +326,7 @@ class MainWindow(QMainWindow):
             if dialog.exec() == QDialog.Accepted:
                 # 解压完成，更新状态
                 self.path_label.setText("解压完成")
-                
+                    
         except Exception as e:
             QMessageBox.critical(self, "错误", f"无法打开解压对话框：{str(e)}")
         

@@ -74,24 +74,23 @@ def main():
     """主函数"""
     try:
         # 启动时进行健康检查
-        from gudazip.core.health_checker import HealthChecker
-        
-        print("正在进行程序健康检查...")
-        is_healthy, issues = HealthChecker.check_all()
-        
-        if not is_healthy:
-            print("⚠️ 发现以下问题：")
-            for issue in issues:
-                print(f"  - {issue}")
-            print()
+        try:
+            from gudazip.core.health_checker import HealthChecker
             
-            # 对于严重问题，询问用户是否继续
-            critical_issues = [issue for issue in issues if "缺少必需模块" in issue or "Python版本过低" in issue]
-            if critical_issues:
-                print("检测到严重问题，程序可能无法正常运行。")
-                # 在GUI环境下，这里会显示对话框询问用户
-        else:
-            print("✅ 程序健康检查通过")
+            print("正在进行程序健康检查...")
+            is_healthy, issues = HealthChecker.check_all()
+            
+            if not is_healthy:
+                print("⚠️ 发现以下问题：")
+                for issue in issues:
+                    print(f"  - {issue}")
+                print()
+            else:
+                print("✅ 程序健康检查通过")
+        except ImportError:
+            print("⚠️ 无法进行健康检查，跳过...")
+            is_healthy = True
+            issues = []
         
         # 检查是否通过命令行强制管理员模式
         force_admin = '--admin' in sys.argv
