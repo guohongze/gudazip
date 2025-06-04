@@ -45,6 +45,7 @@ from ..core.signal_manager import get_signal_manager
 from ..core.file_operation_manager import FileOperationManager
 from ..core.archive_operation_manager import ArchiveOperationManager
 from .context_menu_manager import ContextMenuManager
+from .toolbar_widget import ToolbarWidget
 
 
 class EnhancedIconProvider(QFileIconProvider):
@@ -206,232 +207,18 @@ class FileBrowser(QWidget):
         enhanced_icon_provider = EnhancedIconProvider()
         self.file_model.setIconProvider(enhanced_icon_provider)
         
-        # 创建顶部工具栏
-        toolbar_layout = QHBoxLayout()
+        # 创建工具栏组件
+        self.toolbar = ToolbarWidget(self)
         
-        # 视图切换按钮（最左侧）
-        self.view_toggle_btn = QPushButton()
-        self.view_toggle_btn.setIcon(qta.icon('fa5s.list', color='#333'))
-        self.view_toggle_btn.setToolTip("切换到图标视图")
-        self.view_toggle_btn.setFixedSize(40, 40)  # 从32x32增加到40x40 (25%增长)
-        self.view_toggle_btn.setStyleSheet("""
-            QPushButton {
-                border: 1px solid #d0d0d0;
-                border-radius: 4px;
-                background-color: #f8f9fa;
-                padding: 8px;
-            }
-            QPushButton:hover {
-                background-color: #e3f2fd;
-                border-color: #90caf9;
-            }
-            QPushButton:pressed {
-                background-color: #bbdefb;
-                border-color: #64b5f6;
-            }
-        """)
-        self.view_toggle_btn.clicked.connect(self.toggle_view_mode)
-        toolbar_layout.addWidget(self.view_toggle_btn)
+        # 连接工具栏信号到现有的处理方法
+        self.toolbar.view_toggle_requested.connect(self.toggle_view_mode)
+        self.toolbar.go_up_requested.connect(self.go_up_directory)
+        self.toolbar.location_changed.connect(self.handle_location_selection)
+        self.toolbar.manual_path_requested.connect(self.handle_manual_path_input)
+        self.toolbar.search_text_changed.connect(self.on_search_text_changed)
+        self.toolbar.refresh_requested.connect(self.refresh_view)
         
-        # 向上一级目录按钮
-        self.up_button = QPushButton()
-        self.up_button.setIcon(qta.icon('fa5s.arrow-up', color='#333'))
-        self.up_button.setToolTip("上一级目录")
-        self.up_button.setFixedSize(40, 40)  # 从32x32增加到40x40 (25%增长)
-        self.up_button.setStyleSheet("""
-            QPushButton {
-                border: 1px solid #d0d0d0;
-                border-radius: 4px;
-                background-color: #f8f9fa;
-                padding: 8px;
-            }
-            QPushButton:hover {
-                background-color: #e3f2fd;
-                border-color: #90caf9;
-            }
-            QPushButton:pressed {
-                background-color: #bbdefb;
-                border-color: #64b5f6;
-            }
-            QPushButton:disabled {
-                background-color: #f5f5f5;
-                color: #ccc;
-                border-color: #e0e0e0;
-            }
-        """)
-        self.up_button.clicked.connect(self.go_up_directory)
-        toolbar_layout.addWidget(self.up_button)
-        
-        # 位置标签和下拉框
-        location_label = QLabel("位置:")
-        location_label.setStyleSheet("""
-            QLabel {
-                font-weight: bold;
-                color: #333;
-                margin-right: 5px;
-                margin-left: 8px;
-                border: none;
-                background: transparent;
-                font-size: 15px;
-            }
-        """)
-        toolbar_layout.addWidget(location_label)
-        
-        # 路径下拉选择框
-        self.path_combo = QComboBox()
-        self.path_combo.setEditable(True)
-        self.path_combo.setMinimumWidth(350)
-        self.path_combo.setMaximumHeight(40)  # 从32增加到40 (25%增长)
-        self.path_combo.setStyleSheet("""
-            QComboBox {
-                border: 1px solid #d0d0d0;
-                padding: 6px 12px;
-                background-color: white;
-                font-size: 15px;
-                min-height: 25px;
-                border-radius: 4px;
-            }
-            QComboBox:hover {
-                border-color: #90caf9;
-            }
-            QComboBox:focus {
-                border-color: #1976d2;
-                outline: none;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 25px;
-                border-left-width: 1px;
-                border-left-color: #d0d0d0;
-                border-left-style: solid;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
-                background-color: #f8f9fa;
-            }
-            QComboBox::down-arrow {
-                width: 0; 
-                height: 0; 
-                border-left: 6px solid transparent;
-                border-right: 6px solid transparent; 
-                border-top: 6px solid #666;
-            }
-            QComboBox::down-arrow:hover {
-                border-top-color: #333;
-            }
-            QComboBox QAbstractItemView {
-                border: 2px solid #ccc;
-                border-radius: 6px;
-                background-color: white;
-                selection-background-color: #e3f2fd;
-                outline: none;
-                font-size: 23px;
-                padding: 5px;
-            }
-            QComboBox QAbstractItemView::item {
-                padding: 10px 15px;
-                min-height: 35px;
-            }
-        """)
-        
-        # 获取Windows标准路径并初始化下拉框
-        self._init_path_combo()
-        
-        # 现在连接信号（在模型创建之后）
-        self.path_combo.currentTextChanged.connect(self.handle_location_selection)
-        
-        # 为路径输入框添加回车键事件处理
-        self.path_combo.lineEdit().returnPressed.connect(self.handle_manual_path_input)
-        
-        toolbar_layout.addWidget(self.path_combo)
-        
-        # 搜索框紧随位置框（不添加弹性空间）
-        search_label = QLabel("搜索:")
-        search_label.setStyleSheet("""
-            QLabel {
-                font-weight: bold;
-                color: #333;
-                margin-left: 15px;
-                margin-right: 5px;
-                border: none;
-                background: transparent;
-                font-size: 15px;
-            }
-        """)
-        toolbar_layout.addWidget(search_label)
-        
-        self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("在当前位置中搜索...")
-        self.search_box.textChanged.connect(self.on_search_text_changed)
-        self.search_box.setMinimumWidth(280)
-        self.search_box.setMaximumWidth(350)
-        self.search_box.setMaximumHeight(40)  # 从32增加到40，与下拉框一致
-        self.search_box.setStyleSheet("""
-            QLineEdit {
-                border: 1px solid #d0d0d0;
-                padding: 6px 12px;
-                background-color: white;
-                font-size: 15px;
-                min-height: 25px;
-                border-radius: 4px;
-            }
-            QLineEdit:hover {
-                border-color: #90caf9;
-            }
-            QLineEdit:focus {
-                border-color: #1976d2;
-                outline: none;
-            }
-            QLineEdit::placeholder {
-                color: #999;
-                font-style: italic;
-                font-size: 14px;
-            }
-        """)
-        toolbar_layout.addWidget(self.search_box)
-        
-        # 添加刷新按钮
-        self.refresh_button = QPushButton()
-        self.refresh_button.setIcon(qta.icon('fa5s.sync-alt', color='#333'))
-        self.refresh_button.setToolTip("刷新 (F5)")
-        self.refresh_button.setFixedSize(40, 40)  # 与其他按钮保持一致
-        self.refresh_button.setStyleSheet("""
-            QPushButton {
-                border: 1px solid #d0d0d0;
-                border-radius: 4px;
-                background-color: #f8f9fa;
-                padding: 8px;
-                margin-left: 8px;
-            }
-            QPushButton:hover {
-                background-color: #e3f2fd;
-                border-color: #90caf9;
-            }
-            QPushButton:pressed {
-                background-color: #bbdefb;
-                border-color: #64b5f6;
-            }
-        """)
-        self.refresh_button.clicked.connect(self.refresh_view)
-        toolbar_layout.addWidget(self.refresh_button)
-        
-        # 添加弹性空间到最右侧
-        toolbar_layout.addStretch()
-        
-        # 为整个工具栏添加样式
-        toolbar_widget = QWidget()
-        toolbar_widget.setLayout(toolbar_layout)
-        toolbar_widget.setStyleSheet("""
-            QWidget {
-                background-color: #f8f9fa;
-                border: 1px solid #e0e0e0;
-                border-radius: 8px;
-                padding: 8px;
-                margin: 2px;
-            }
-        """)
-        
-        layout.addWidget(toolbar_widget)
+        layout.addWidget(self.toolbar)
         
         # 创建树视图（详细信息视图）
         self.tree_view = QTreeView()
@@ -497,36 +284,6 @@ class FileBrowser(QWidget):
         layout.addWidget(self.tree_view)
         self.current_view = self.tree_view
         self.list_view.hide()
-
-    def _init_path_combo(self):
-        """初始化路径下拉框"""
-        desktop_path = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
-        documents_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
-        downloads_path = QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
-        pictures_path = QStandardPaths.writableLocation(QStandardPaths.PicturesLocation)
-        videos_path = QStandardPaths.writableLocation(QStandardPaths.MoviesLocation)
-        music_path = QStandardPaths.writableLocation(QStandardPaths.MusicLocation)
-        home_path = QStandardPaths.writableLocation(QStandardPaths.HomeLocation)
-        
-        # 添加Windows11风格图标到下拉框 - 使用更大的emoji图标
-        windows_paths = [
-            ("🖥️  桌面", desktop_path),
-            ("💻  此电脑", ""),  # 特殊处理
-            ("📂  文档", documents_path),
-            ("🖼️  图片", pictures_path),
-            ("⬇️  下载", downloads_path),
-            ("🎬  视频", videos_path),
-            ("🎵  音乐", music_path),
-            ("👤  用户", home_path),
-        ]
-        
-        for name, path in windows_paths:
-            if path == "" or os.path.exists(path):
-                if path == "":
-                    # 此电脑特殊处理
-                    self.path_combo.addItem(name, "ThisPC")
-                else:
-                    self.path_combo.addItem(name, path)
 
     def _apply_view_styles(self):
         """应用视图样式"""
@@ -668,8 +425,8 @@ class FileBrowser(QWidget):
             
             self.current_view = self.list_view
             self.current_view_mode = "图标"
-            self.view_toggle_btn.setIcon(qta.icon('fa5s.th', color='#333'))
-            self.view_toggle_btn.setToolTip("切换到详细信息视图")
+            # 更新工具栏按钮显示
+            self.toolbar.update_view_mode("图标")
         else:
             # 切换到详细信息视图
             self.list_view.hide()
@@ -682,8 +439,8 @@ class FileBrowser(QWidget):
             
             self.current_view = self.tree_view
             self.current_view_mode = "详细信息"
-            self.view_toggle_btn.setIcon(qta.icon('fa5s.list', color='#333'))
-            self.view_toggle_btn.setToolTip("切换到图标视图")
+            # 更新工具栏按钮显示
+            self.toolbar.update_view_mode("详细信息")
         
         # 设置图标视图显示
         self.setup_icon_view()
@@ -728,46 +485,49 @@ class FileBrowser(QWidget):
             self.tree_view.setRootIndex(root_index)
             self.list_view.setRootIndex(root_index)
             
-            # 更新下拉框显示
+            # 更新下拉框显示 - 使用ToolbarWidget的接口
             # 首先检查是否在预设列表中
             path_found = False
-            for i in range(self.path_combo.count()):
-                if self.path_combo.itemData(i) == path:
-                    self.path_combo.setCurrentIndex(i)
+            for i in range(self.toolbar.path_combo.count()):
+                if self.toolbar.path_combo.itemData(i) == path:
+                    # 使用信号管理器安全地设置，避免触发路径变化事件
+                    self.toolbar.update_path_display(
+                        path, 
+                        use_signal_manager=self.signal_manager,
+                        block_context="filesystem_path_update"
+                    )
                     path_found = True
                     break
             
             if not path_found:
                 # 如果路径不在预设列表中，直接设置文本
                 # 使用信号管理器安全地设置文本，避免触发路径变化事件
-                with self.signal_manager.block_signal(
-                    self.path_combo.currentTextChanged,
-                    self.handle_location_selection,
-                    "filesystem_path_update"
-                ):
-                    self.path_combo.setCurrentText(path)
+                self.toolbar.update_path_display(
+                    path,
+                    use_signal_manager=self.signal_manager,
+                    block_context="filesystem_path_update"
+                )
             
             # 更新向上按钮状态
             self.update_up_button_state()
-            
+        
     def update_up_button_state(self):
         """更新向上按钮的启用状态"""
         if self.archive_viewing_mode:
             # 压缩包查看模式下的逻辑
             if self.archive_current_dir == "":
                 # 在压缩包根目录，可以退出压缩包查看模式
-                self.up_button.setEnabled(True)
-                self.up_button.setToolTip("退出压缩包查看")
+                self.toolbar.update_up_button_state(True, "退出压缩包查看")
             else:
                 # 在子目录，可以返回上一级
-                self.up_button.setEnabled(True)
                 parent_dir = os.path.dirname(self.archive_current_dir)
                 if parent_dir == self.archive_current_dir:
                     parent_dir = ""
                 if parent_dir:
-                    self.up_button.setToolTip(f"返回到: {os.path.basename(parent_dir)}")
+                    tooltip = f"返回到: {os.path.basename(parent_dir)}"
                 else:
-                    self.up_button.setToolTip("返回到压缩包根目录")
+                    tooltip = "返回到压缩包根目录"
+                self.toolbar.update_up_button_state(True, tooltip)
             return
             
         # 文件系统模式下的原有逻辑
@@ -775,18 +535,16 @@ class FileBrowser(QWidget):
         
         # 如果当前在"此电脑"或者是根目录，禁用向上按钮
         if not current_path or current_path == "":
-            self.up_button.setEnabled(False)
-            self.up_button.setToolTip("已在最顶级目录")
+            self.toolbar.update_up_button_state(False, "已在最顶级目录")
         else:
             parent_path = os.path.dirname(current_path)
             # 检查是否已经到达根目录
             if parent_path == current_path:
                 # 到达系统根目录，但还可以返回到"此电脑"
-                self.up_button.setEnabled(True)
-                self.up_button.setToolTip("返回到此电脑")
+                self.toolbar.update_up_button_state(True, "返回到此电脑")
             else:
-                self.up_button.setEnabled(True)
-                self.up_button.setToolTip(f"上一级目录: {os.path.basename(parent_path) if parent_path else '此电脑'}")
+                tooltip = f"上一级目录: {os.path.basename(parent_path) if parent_path else '此电脑'}"
+                self.toolbar.update_up_button_state(True, tooltip)
         
     def handle_location_selection(self, path_text):
         """处理位置下拉菜单选择 - 完全独立的位置切换处理"""
@@ -795,7 +553,7 @@ class FileBrowser(QWidget):
             self.force_exit_archive_mode()
             
         # 从下拉框数据中提取真实路径
-        current_data = self.path_combo.currentData()
+        current_data = self.toolbar.get_path_data()
         if current_data:
             target_path = current_data
         else:
@@ -810,7 +568,7 @@ class FileBrowser(QWidget):
         if self.archive_viewing_mode:
             self.force_exit_archive_mode()
             
-        path_text = self.path_combo.lineEdit().text().strip()
+        path_text = self.toolbar.get_path_text()
         if not path_text:
             return
             
@@ -824,15 +582,14 @@ class FileBrowser(QWidget):
             self.force_navigate_to_path(path_text)
         else:
             QMessageBox.warning(self, "路径错误", f"路径不存在或不是文件夹: {path_text}")
-            # 恢复为当前路径（使用信号管理器保护）
+            # 恢复为当前路径（使用ToolbarWidget的接口和信号管理器保护）
             current_path = self.get_current_root_path()
             if current_path:
-                with self.signal_manager.block_signal(
-                    self.path_combo.currentTextChanged,
-                    self.handle_location_selection,
-                    "path_input_recovery"
-                ):
-                    self.path_combo.lineEdit().setText(current_path)
+                self.toolbar.update_path_display(
+                    current_path,
+                    use_signal_manager=self.signal_manager,
+                    block_context="path_input_recovery"
+                )
     
     def go_up_directory(self):
         """返回上一级目录"""
@@ -1138,15 +895,14 @@ class FileBrowser(QWidget):
             if hasattr(self, 'update_up_button_state'):
                 self.update_up_button_state()
             
-            # 更新路径显示
-            if hasattr(self, 'path_combo') and self.path_combo:
+            # 更新路径显示 - 使用ToolbarWidget的接口
+            if hasattr(self, 'toolbar') and self.toolbar:
                 # 使用信号管理器安全地更新路径，避免触发handle_location_selection
-                with self.signal_manager.block_signal(
-                    self.path_combo.currentTextChanged, 
-                    self.handle_location_selection,
-                    "archive_path_update"
-                ):
-                    self.path_combo.lineEdit().setText(os.path.basename(archive_path))
+                self.toolbar.update_path_display(
+                    os.path.basename(archive_path),
+                    use_signal_manager=self.signal_manager,
+                    block_context="archive_path_update"
+                )
             
         except Exception as e:
             print(f"进入压缩包模式失败: {e}")
@@ -1247,23 +1003,12 @@ class FileBrowser(QWidget):
     
     def update_path_combo_display(self, path):
         """更新路径下拉框显示 - 独立的显示更新逻辑"""
-        # 使用信号管理器安全地更新显示，避免递归触发
-        with self.signal_manager.block_signal(
-            self.path_combo.currentTextChanged,
-            self.handle_location_selection,
-            "combo_display_update"
-        ):
-            # 检查是否在预设列表中
-            path_found = False
-            for i in range(self.path_combo.count()):
-                if self.path_combo.itemData(i) == path:
-                    self.path_combo.setCurrentIndex(i)
-                    path_found = True
-                    break
-            
-            if not path_found:
-                # 如果路径不在预设列表中，直接设置文本
-                self.path_combo.setCurrentText(path)
+        # 使用ToolbarWidget的接口安全地更新显示，避免递归触发
+        self.toolbar.update_path_display(
+            path,
+            use_signal_manager=self.signal_manager,
+            block_context="combo_display_update"
+        )
 
     def refresh_view(self):
         """刷新视图"""
@@ -1307,19 +1052,18 @@ class FileBrowser(QWidget):
         self.display_archive_directory_content()
         # 更新向上按钮状态
         self.update_up_button_state()
-        # 更新路径显示（使用信号管理器保护）
+        # 更新路径显示（使用ToolbarWidget的接口和信号管理器保护）
         if directory:
             display_path = f"{os.path.basename(self.archive_path)}/{directory}"
         else:
             display_path = os.path.basename(self.archive_path)
         
-        # 使用信号管理器安全地更新路径显示，避免触发handle_location_selection
-        with self.signal_manager.block_signal(
-            self.path_combo.currentTextChanged,
-            self.handle_location_selection,
-            "archive_navigation_update"
-        ):
-            self.path_combo.lineEdit().setText(display_path)
+        # 使用ToolbarWidget的接口安全地更新路径显示，避免触发handle_location_selection
+        self.toolbar.update_path_display(
+            display_path,
+            use_signal_manager=self.signal_manager,
+            block_context="archive_navigation_update"
+        )
     
     def display_archive_directory_content(self):
         """显示压缩包当前目录的内容"""
