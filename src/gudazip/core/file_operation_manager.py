@@ -875,6 +875,64 @@ class FileOperationManager(QObject):
 
     # ========== 文件系统操作 ==========
 
+    def open_file(self, file_path: str) -> FileOperationResult:
+        """
+        用系统默认程序打开文件
+        
+        Args:
+            file_path: 要打开的文件路径
+            
+        Returns:
+            FileOperationResult: 操作结果
+        """
+        try:
+            if not os.path.exists(file_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_NOT_FOUND,
+                    ErrorSeverity.ERROR,
+                    f"文件不存在：{file_path}",
+                    context={"path": file_path, "operation": "open_file"}
+                )
+                return FileOperationResult(False, "文件不存在")
+            
+            if not os.path.isfile(file_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_OPERATION,
+                    ErrorSeverity.ERROR,
+                    f"指定路径不是文件：{file_path}",
+                    context={"path": file_path, "operation": "open_file"}
+                )
+                return FileOperationResult(False, "指定路径不是文件")
+            
+            # 根据操作系统使用不同的命令打开文件
+            if sys.platform == "win32":
+                # Windows使用start命令
+                subprocess.run(["start", "", file_path], shell=True, check=True)
+            elif sys.platform == "darwin":
+                # macOS使用open命令
+                subprocess.run(["open", file_path], check=True)
+            else:
+                # Linux使用xdg-open命令
+                subprocess.run(["xdg-open", file_path], check=True)
+            
+            return FileOperationResult(True, f"已打开文件：{os.path.basename(file_path)}", [file_path])
+            
+        except subprocess.CalledProcessError as e:
+            error_msg = f"无法打开文件，可能没有关联的程序：{os.path.basename(file_path)}"
+            self.error_manager.handle_exception(
+                e,
+                context={"path": file_path, "operation": "open_file"},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, error_msg)
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"path": file_path, "operation": "open_file"},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, f"打开文件失败：{str(e)}")
+
     def open_in_explorer(self, dir_path: str) -> FileOperationResult:
         """在Windows资源管理器中打开目录"""
         try:
