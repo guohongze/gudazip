@@ -10,6 +10,8 @@ from PySide6.QtWidgets import QMenu
 import qtawesome as qta
 import os
 
+from ..core.error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
+
 
 class ContextMenuManager(QObject):
     """上下文菜单管理器 - 负责所有右键菜单逻辑"""
@@ -17,6 +19,7 @@ class ContextMenuManager(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_widget = parent  # FileBrowser实例
+        self.error_manager = get_error_manager(parent)
         
     def show_context_menu(self, index, global_position):
         """显示上下文菜单的主入口"""

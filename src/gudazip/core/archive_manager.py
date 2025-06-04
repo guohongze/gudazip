@@ -10,14 +10,16 @@ from typing import List, Dict, Any, Optional
 from .zip_handler import ZipHandler
 from .rar_handler import RarHandler
 from .permission_manager import PermissionManager
+from .error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
 
 
 class ArchiveManager:
     """压缩包管理器"""
     
-    def __init__(self):
+    def __init__(self, parent=None):
         """初始化管理器"""
         self.handlers = {}
+        self.error_manager = get_error_manager(parent)
         self._register_handlers()
         
     def _register_handlers(self):
@@ -65,6 +67,11 @@ class ArchiveManager:
             return None
             
         except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"file_path": file_path, "operation": "get_archive_info"},
+                category=ErrorCategory.ARCHIVE_OPERATION
+            )
             raise Exception(f"获取压缩包信息失败: {e}")
         
     def extract_archive(self, file_path: str, extract_to: str, 
@@ -91,6 +98,11 @@ class ArchiveManager:
             return False
             
         except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"file_path": file_path, "extract_to": extract_to, "operation": "extract_archive"},
+                category=ErrorCategory.ARCHIVE_OPERATION
+            )
             raise Exception(f"解压失败: {e}")
         
     def create_archive(self, file_path: str, files: List[str], 
@@ -123,6 +135,11 @@ class ArchiveManager:
                 raise ValueError(f"不支持创建 {ext} 格式的压缩包")
                 
         except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"file_path": file_path, "files": files, "operation": "create_archive"},
+                category=ErrorCategory.ARCHIVE_OPERATION
+            )
             raise Exception(f"创建压缩包失败: {e}")
         
     def get_archive_handler(self, file_path: str):
@@ -164,6 +181,11 @@ class ArchiveManager:
                 raise ValueError(f"不支持在 {ext} 格式中重命名文件")
                 
         except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"archive_path": archive_path, "old_name": old_name, "new_name": new_name, "operation": "rename_file_in_archive"},
+                category=ErrorCategory.ARCHIVE_OPERATION
+            )
             raise Exception(f"重命名失败: {e}")
     
     def delete_file_from_archive(self, archive_path: str, file_name: str) -> bool:
@@ -181,6 +203,11 @@ class ArchiveManager:
                 raise ValueError(f"不支持在 {ext} 格式中删除文件")
                 
         except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"archive_path": archive_path, "file_name": file_name, "operation": "delete_file_from_archive"},
+                category=ErrorCategory.ARCHIVE_OPERATION
+            )
             raise Exception(f"删除失败: {e}")
     
     def list_archive_contents(self, archive_path: str) -> List[Dict[str, Any]]:

@@ -44,6 +44,7 @@ else:
 from ..core.signal_manager import get_signal_manager
 from ..core.file_operation_manager import FileOperationManager
 from ..core.archive_operation_manager import ArchiveOperationManager
+from ..core.error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
 from .context_menu_manager import ContextMenuManager
 from .toolbar_widget import ToolbarWidget
 from .file_view_widget import FileViewWidget
@@ -75,6 +76,7 @@ class FileBrowser(QWidget):
         self.file_operation_manager = FileOperationManager(self)
         self.archive_operation_manager = ArchiveOperationManager(self)
         self.context_menu_manager = ContextMenuManager(self)
+        self.error_manager = get_error_manager(self)
         
         # 连接操作管理器的信号
         self._connect_operation_signals()

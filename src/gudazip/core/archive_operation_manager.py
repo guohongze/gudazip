@@ -16,6 +16,9 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog, QWidget
 from PySide6.QtCore import QObject, Signal
 import logging
 
+# 导入错误管理器
+from .error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
+
 # 异步操作支持
 try:
     from .async_file_operations import AsyncFileOperationManager
@@ -23,6 +26,7 @@ try:
 except ImportError:
     AsyncFileOperationManager = None
     ASYNC_OPERATIONS_AVAILABLE = False
+    logger = logging.getLogger(__name__)
     logger.warning("AsyncFileOperationManager not available for archives, using synchronous operations only")
 
 logger = logging.getLogger(__name__)
@@ -72,28 +76,33 @@ class ArchiveOperationManager(QObject):
     """
     压缩包操作管理器
     
-    负责所有压缩包操作，包括：
-    - 压缩包内容列出和导航
-    - 文件解压和临时文件管理
-    - 压缩包文件的修改（重命名、删除等）
-    - 压缩包内文件的打开和预览
-    - 异步解压操作支持
+    负责所有压缩包相关的操作：
+    1. 压缩包信息查看和验证
+    2. 解压操作（支持异步）
+    3. 压缩包内文件管理
+    4. 压缩包创建和修改
+    5. 统一的错误处理
+    
+    通过信号与UI层通信，完全分离业务逻辑
     """
     
     # 信号定义
-    operation_started = Signal(str, str)  # 操作开始 (操作类型, 压缩包路径)
-    operation_finished = Signal(str, object)  # 操作完成 (操作类型, ArchiveOperationResult)
-    extraction_progress = Signal(int, int)  # 解压进度 (当前, 总数)
+    operation_started = Signal(str, str, str)      # operation_type, file_path, description
+    operation_finished = Signal(str, object)  # operation_type, ArchiveOperationResult
+    
     # 异步操作信号
-    async_operation_started = Signal(str, str, str)  # operation_id, operation_type, description
-    async_operation_completed = Signal(str, str, object)  # operation_id, operation_type, result
-    async_operation_failed = Signal(str, str, str)  # operation_id, operation_type, error_message
+    async_operation_started = Signal(str, str, str)     # operation_id, operation_type, description  
+    async_operation_completed = Signal(str, str, object) # operation_id, operation_type, result
+    async_operation_failed = Signal(str, str, str)     # operation_id, operation_type, error_message
     
     def __init__(self, parent: Optional[QWidget] = None, enable_async: bool = True):
         super().__init__()
         self.parent_widget = parent
         self.archive_manager = None
         self.temp_directories = []  # 记录创建的临时目录，用于清理
+        
+        # 初始化错误管理器
+        self.error_manager = get_error_manager(parent)
         
         # 异步操作配置
         self.enable_async = enable_async and ASYNC_OPERATIONS_AVAILABLE
@@ -108,7 +117,13 @@ class ArchiveOperationManager(QObject):
                 self.async_manager.operation_failed.connect(self._on_async_operation_failed)
                 logger.info("Async archive operations enabled")
             except Exception as e:
-                logger.error(f"Failed to initialize async archive operations: {e}")
+                # 使用错误管理器处理异步初始化失败
+                self.error_manager.handle_exception(
+                    e,
+                    context={"operation": "initialize_async_archive_operations"},
+                    show_dialog=False,  # 不显示对话框，只记录日志
+                    category=ErrorCategory.APP_DEPENDENCY
+                )
                 self.enable_async = False
                 self.async_manager = None
         
@@ -124,7 +139,12 @@ class ArchiveOperationManager(QObject):
             from .archive_manager import ArchiveManager
             self.archive_manager = ArchiveManager()
         except ImportError as e:
-            logger.error(f"Failed to import ArchiveManager: {e}")
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "initialize_archive_manager"},
+                show_dialog=False,
+                category=ErrorCategory.APP_DEPENDENCY
+            )
             self.archive_manager = None
     
     def set_parent_widget(self, parent: QWidget):
@@ -165,7 +185,7 @@ class ArchiveOperationManager(QObject):
             return ArchiveOperationResult(False, "压缩包管理器不可用")
         
         try:
-            self.operation_started.emit("list_contents", archive_path)
+            self.operation_started.emit("list_contents", archive_path, "")
             
             # 获取文件列表
             file_list = self.archive_manager.list_archive_contents(archive_path)
@@ -267,7 +287,7 @@ class ArchiveOperationManager(QObject):
             temp_dir = tempfile.mkdtemp(prefix="gudazip_")
             self.temp_directories.append(temp_dir)
             
-            self.operation_started.emit("extract_file", archive_path)
+            self.operation_started.emit("extract_file", archive_path, "")
             
             # 解压文件
             success = self.archive_manager.extract_archive(
@@ -371,7 +391,7 @@ class ArchiveOperationManager(QObject):
         else:
             # 使用同步操作（原有逻辑）
             try:
-                self.operation_started.emit("extract_archive", archive_path)
+                self.operation_started.emit("extract_archive", archive_path, "")
                 
                 success = self.archive_manager.extract_archive(
                     archive_path, 
@@ -518,7 +538,7 @@ class ArchiveOperationManager(QObject):
         new_path = os.path.join(parent_dir, new_name).replace('\\', '/')
         
         try:
-            self.operation_started.emit("rename_file", archive_path)
+            self.operation_started.emit("rename_file", archive_path, "")
             
             success = self.archive_manager.rename_file_in_archive(
                 archive_path, old_path, new_path
@@ -572,7 +592,7 @@ class ArchiveOperationManager(QObject):
                 return ArchiveOperationResult(False, "用户取消了删除操作")
         
         try:
-            self.operation_started.emit("delete_file", archive_path)
+            self.operation_started.emit("delete_file", archive_path, "")
             
             success = self.archive_manager.delete_file_from_archive(
                 archive_path, file_path
@@ -748,4 +768,135 @@ class ArchiveOperationManager(QObject):
         """处理异步操作失败信号"""
         archive_result = ArchiveOperationResult(False, f"异步解压失败: {error_message}", error_details=error_message)
         self.operation_finished.emit("extract_archive", archive_result)
-        self.async_operation_failed.emit(operation_id, "extract", error_message) 
+        self.async_operation_failed.emit(operation_id, "extract", error_message)
+
+    # ========== 压缩包验证和信息获取 ==========
+    
+    def validate_archive(self, archive_path: str) -> bool:
+        """
+        验证压缩包文件完整性
+        
+        Args:
+            archive_path: 压缩包文件路径
+            
+        Returns:
+            bool: 压缩包是否有效
+        """
+        try:
+            if not os.path.exists(archive_path):
+                return False
+            
+            if not self.is_supported_archive(archive_path):
+                return False
+            
+            if not self.archive_manager:
+                return False
+            
+            # 使用archive_manager验证压缩包
+            return self.archive_manager.validate_archive(archive_path)
+            
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"path": archive_path, "operation": "validate_archive"},
+                show_dialog=False,
+                category=ErrorCategory.ARCHIVE_CORRUPTED
+            )
+            return False
+    
+    def get_archive_info(self, archive_path: str) -> Optional[Dict[str, Any]]:
+        """
+        获取压缩包详细信息
+        
+        Args:
+            archive_path: 压缩包文件路径
+            
+        Returns:
+            Dict[str, Any]: 压缩包信息，包含文件列表、总大小等
+        """
+        try:
+            if not os.path.exists(archive_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_NOT_FOUND,
+                    ErrorSeverity.ERROR,
+                    f"压缩包文件不存在：{archive_path}",
+                    context={"path": archive_path}
+                )
+                return None
+            
+            if not self.is_supported_archive(archive_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.ARCHIVE_FORMAT,
+                    ErrorSeverity.ERROR,
+                    f"不支持的压缩包格式：{archive_path}",
+                    context={"path": archive_path}
+                )
+                return None
+            
+            if not self.archive_manager:
+                return None
+            
+            # 获取压缩包信息
+            archive_info = self.archive_manager.get_archive_info(archive_path)
+            
+            if archive_info:
+                return archive_info
+            else:
+                self.error_manager.handle_error(
+                    ErrorCategory.ARCHIVE_OPERATION,
+                    ErrorSeverity.ERROR,
+                    "无法读取压缩包信息",
+                    context={"path": archive_path}
+                )
+                return None
+                
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"path": archive_path, "operation": "get_archive_info"},
+                category=ErrorCategory.ARCHIVE_OPERATION
+            )
+            return None
+    
+    def is_archive_file(self, file_path: str) -> bool:
+        """
+        检查文件是否为压缩包（包含格式和完整性检查）
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            bool: 是否为有效的压缩包文件
+        """
+        if not self.is_supported_archive(file_path):
+            return False
+        
+        return self.validate_archive(file_path)
+    
+    def get_archive_type(self, archive_path: str) -> str:
+        """
+        获取压缩包类型
+        
+        Args:
+            archive_path: 压缩包文件路径
+            
+        Returns:
+            str: 压缩包类型（如 'zip', 'rar', '7z' 等）
+        """
+        try:
+            _, ext = os.path.splitext(archive_path.lower())
+            
+            type_mapping = {
+                '.zip': 'ZIP',
+                '.rar': 'RAR',
+                '.7z': '7Z',
+                '.tar': 'TAR',
+                '.gz': 'GZIP',
+                '.bz2': 'BZIP2',
+                '.xz': 'XZ'
+            }
+            
+            return type_mapping.get(ext, '未知')
+            
+        except Exception:
+            return '未知' 

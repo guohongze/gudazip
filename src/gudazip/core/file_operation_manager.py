@@ -16,6 +16,9 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog, QWidget
 from PySide6.QtCore import QObject, Signal
 import logging
 
+# 导入错误管理器
+from .error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
+
 logger = logging.getLogger(__name__)
 
 # 异步操作支持
@@ -89,27 +92,34 @@ class FileOperationManager(QObject):
     """
     文件操作管理器
     
-    负责所有文件系统操作，包括：
-    - 文件/文件夹的创建、删除、重命名、复制、移动
-    - 权限检查和管理
-    - 剪贴板操作
-    - 错误处理和用户交互
-    - 异步文件操作支持
+    负责所有文件系统相关的操作：
+    1. 文件/文件夹的创建、删除、重命名、复制、移动
+    2. 剪贴板操作（复制、剪切、粘贴）
+    3. 文件/文件夹的打开、在资源管理器中显示
+    4. 异步文件操作支持
+    5. 统一的错误处理
+    
+    通过信号与UI层通信，完全分离业务逻辑
     """
     
     # 信号定义
-    operation_started = Signal(str, list)  # 操作开始 (操作类型, 文件列表)
-    operation_finished = Signal(str, object)  # 操作完成 (操作类型, FileOperationResult)
-    progress_updated = Signal(int, int)  # 进度更新 (当前, 总数)
+    operation_finished = Signal(str, object)  # operation_type, FileOperationResult
+    
     # 异步操作信号
-    async_operation_started = Signal(str, str, str)  # operation_id, operation_type, description
+    async_operation_started = Signal(str, str, str)    # operation_id, operation_type, description
     async_operation_completed = Signal(str, str, object)  # operation_id, operation_type, result
-    async_operation_failed = Signal(str, str, str)  # operation_id, operation_type, error_message
+    async_operation_failed = Signal(str, str, str)     # operation_id, operation_type, error_message
     
     def __init__(self, parent: Optional[QWidget] = None, enable_async: bool = True):
         super().__init__()
         self.parent_widget = parent
-        self.clipboard = ClipboardManager()
+        
+        # 初始化错误管理器
+        self.error_manager = get_error_manager(parent)
+        
+        # 剪贴板操作状态
+        self.clipboard_operation = None  # "copy" 或 "cut"
+        self.clipboard_items = []
         
         # 异步操作配置
         self.enable_async = enable_async and ASYNC_OPERATIONS_AVAILABLE
@@ -124,17 +134,21 @@ class FileOperationManager(QObject):
                 self.async_manager.operation_failed.connect(self._on_async_operation_failed)
                 logger.info("Async file operations enabled")
             except Exception as e:
-                logger.error(f"Failed to initialize async operations: {e}")
+                # 使用错误管理器处理异步初始化失败
+                self.error_manager.handle_exception(
+                    e, 
+                    context={"operation": "initialize_async_operations"},
+                    show_dialog=False,  # 不显示对话框，只记录日志
+                    category=ErrorCategory.APP_DEPENDENCY
+                )
                 self.enable_async = False
                 self.async_manager = None
         
-        # 异步操作阈值配置（文件数量超过此值时使用异步操作）
-        self.async_threshold = {
-            'copy': 5,      # 复制超过5个文件时使用异步
-            'move': 3,      # 移动超过3个文件时使用异步
-            'delete': 10,   # 删除超过10个文件时使用异步
-            'paste': 5      # 粘贴超过5个文件时使用异步
-        }
+        # 异步操作阈值（文件数量超过此值时使用异步操作）
+        self.async_copy_threshold = 5    # 复制超过5个文件时使用异步
+        self.async_move_threshold = 3    # 移动超过3个文件时使用异步
+        self.async_delete_threshold = 10 # 删除超过10个文件时使用异步
+        self.async_paste_threshold = 5   # 粘贴超过5个文件时使用异步
         
     def _on_async_operation_started(self, operation_id: str, description: str):
         """处理异步操作开始信号"""
@@ -218,105 +232,188 @@ class FileOperationManager(QObject):
     
     def create_folder(self, parent_path: str, folder_name: str = None) -> FileOperationResult:
         """
-        创建新文件夹
+        在指定路径创建新文件夹
         
         Args:
             parent_path: 父目录路径
-            folder_name: 文件夹名称，如果为None则弹出输入框
+            folder_name: 文件夹名称（如果为None则弹出输入框）
             
         Returns:
             FileOperationResult: 操作结果
         """
-        if not os.path.exists(parent_path) or not os.path.isdir(parent_path):
-            return FileOperationResult(False, "目标路径不存在或不是文件夹", error_details=f"Invalid parent path: {parent_path}")
-        
-        # 如果没有提供文件夹名称，弹出输入框
-        if folder_name is None:
-            if not self.parent_widget:
-                return FileOperationResult(False, "无法获取文件夹名称：缺少父窗口")
-            
-            folder_name, ok = QInputDialog.getText(
-                self.parent_widget, "新建文件夹", 
-                "请输入文件夹名称:", text="新建文件夹"
-            )
-            
-            if not ok or not folder_name.strip():
-                return FileOperationResult(False, "操作已取消")
-            
-            folder_name = folder_name.strip()
-        
-        new_folder_path = os.path.join(parent_path, folder_name)
-        
-        if os.path.exists(new_folder_path):
-            return FileOperationResult(False, f"文件夹 '{folder_name}' 已经存在")
-        
         try:
-            self.operation_started.emit("create_folder", [new_folder_path])
-            os.makedirs(new_folder_path)
-            result = FileOperationResult(True, f"成功创建文件夹: {folder_name}", [new_folder_path])
-            self.operation_finished.emit("create_folder", result)
-            return result
+            if not os.path.exists(parent_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_NOT_FOUND,
+                    ErrorSeverity.ERROR,
+                    f"父目录不存在：{parent_path}",
+                    context={"path": parent_path, "operation": "create_folder"}
+                )
+                return FileOperationResult(False, "父目录不存在")
+            
+            if not os.path.isdir(parent_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_OPERATION,
+                    ErrorSeverity.ERROR,
+                    f"指定路径不是目录：{parent_path}",
+                    context={"path": parent_path, "operation": "create_folder"}
+                )
+                return FileOperationResult(False, "指定路径不是目录")
+            
+            if folder_name is None:
+                folder_name, ok = QInputDialog.getText(
+                    self.parent_widget,
+                    "新建文件夹",
+                    "请输入文件夹名称:",
+                    text="新建文件夹"
+                )
+                
+                if not ok or not folder_name.strip():
+                    return FileOperationResult(False, "用户取消创建文件夹")
+                
+                folder_name = folder_name.strip()
+            
+            # 检查文件夹名称是否包含非法字符
+            illegal_chars = '<>:"/\\|?*'
+            for char in illegal_chars:
+                if char in folder_name:
+                    self.error_manager.handle_error(
+                        ErrorCategory.USER_INPUT,
+                        ErrorSeverity.WARNING,
+                        f"文件夹名包含非法字符：{char}",
+                        details=f"文件夹名不能包含以下字符：{illegal_chars}",
+                        context={"folder_name": folder_name, "illegal_char": char}
+                    )
+                    return FileOperationResult(False, f"文件夹名包含非法字符：{char}")
+            
+            folder_path = os.path.join(parent_path, folder_name)
+            
+            # 检查是否已存在
+            if os.path.exists(folder_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_OPERATION,
+                    ErrorSeverity.WARNING,
+                    f"文件夹已存在：{folder_name}",
+                    context={"folder_path": folder_path, "operation": "create_folder"}
+                )
+                return FileOperationResult(False, f"文件夹已存在：{folder_name}")
+            
+            # 创建文件夹
+            os.makedirs(folder_path)
+            
+            return FileOperationResult(True, f"成功创建文件夹：{folder_name}", [folder_path])
+            
+        except PermissionError as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"path": parent_path, "folder_name": folder_name, "operation": "create_folder"},
+                category=ErrorCategory.FILE_PERMISSION
+            )
+            return FileOperationResult(False, "权限不足，无法创建文件夹")
         except Exception as e:
-            error_msg = f"无法创建文件夹: {str(e)}"
-            result = FileOperationResult(False, error_msg, error_details=str(e))
-            self.operation_finished.emit("create_folder", result)
-            return result
+            self.error_manager.handle_exception(
+                e,
+                context={"path": parent_path, "folder_name": folder_name, "operation": "create_folder"},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, f"创建文件夹失败：{str(e)}")
     
     def create_file(self, parent_path: str, file_name: str = None) -> FileOperationResult:
         """
-        创建新文件
+        在指定路径创建新文件
         
         Args:
             parent_path: 父目录路径
-            file_name: 文件名称，如果为None则弹出输入框
+            file_name: 文件名称（如果为None则弹出输入框）
             
         Returns:
             FileOperationResult: 操作结果
         """
-        if not os.path.exists(parent_path) or not os.path.isdir(parent_path):
-            return FileOperationResult(False, "目标路径不存在或不是文件夹", error_details=f"Invalid parent path: {parent_path}")
-        
-        # 如果没有提供文件名称，弹出输入框
-        if file_name is None:
-            if not self.parent_widget:
-                return FileOperationResult(False, "无法获取文件名称：缺少父窗口")
-            
-            file_name, ok = QInputDialog.getText(
-                self.parent_widget, "新建文件", 
-                "请输入文件名称:", text="新建文件.txt"
-            )
-            
-            if not ok or not file_name.strip():
-                return FileOperationResult(False, "操作已取消")
-            
-            file_name = file_name.strip()
-        
-        new_file_path = os.path.join(parent_path, file_name)
-        
-        if os.path.exists(new_file_path):
-            return FileOperationResult(False, f"文件 '{file_name}' 已经存在")
-        
         try:
-            self.operation_started.emit("create_file", [new_file_path])
-            with open(new_file_path, 'w', encoding='utf-8') as f:
+            if not os.path.exists(parent_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_NOT_FOUND,
+                    ErrorSeverity.ERROR,
+                    f"父目录不存在：{parent_path}",
+                    context={"path": parent_path, "operation": "create_file"}
+                )
+                return FileOperationResult(False, "父目录不存在")
+            
+            if not os.path.isdir(parent_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_OPERATION,
+                    ErrorSeverity.ERROR,
+                    f"指定路径不是目录：{parent_path}",
+                    context={"path": parent_path, "operation": "create_file"}
+                )
+                return FileOperationResult(False, "指定路径不是目录")
+            
+            if file_name is None:
+                file_name, ok = QInputDialog.getText(
+                    self.parent_widget,
+                    "新建文件",
+                    "请输入文件名称:",
+                    text="新建文件.txt"
+                )
+                
+                if not ok or not file_name.strip():
+                    return FileOperationResult(False, "用户取消创建文件")
+                
+                file_name = file_name.strip()
+            
+            # 检查文件名称是否包含非法字符
+            illegal_chars = '<>:"/\\|?*'
+            for char in illegal_chars:
+                if char in file_name:
+                    self.error_manager.handle_error(
+                        ErrorCategory.USER_INPUT,
+                        ErrorSeverity.WARNING,
+                        f"文件名包含非法字符：{char}",
+                        details=f"文件名不能包含以下字符：{illegal_chars}",
+                        context={"file_name": file_name, "illegal_char": char}
+                    )
+                    return FileOperationResult(False, f"文件名包含非法字符：{char}")
+            
+            file_path = os.path.join(parent_path, file_name)
+            
+            # 检查是否已存在
+            if os.path.exists(file_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_OPERATION,
+                    ErrorSeverity.WARNING,
+                    f"文件已存在：{file_name}",
+                    context={"file_path": file_path, "operation": "create_file"}
+                )
+                return FileOperationResult(False, f"文件已存在：{file_name}")
+            
+            # 创建文件
+            with open(file_path, 'w', encoding='utf-8') as f:
                 f.write("")  # 创建空文件
-            result = FileOperationResult(True, f"成功创建文件: {file_name}", [new_file_path])
-            self.operation_finished.emit("create_file", result)
-            return result
+            
+            return FileOperationResult(True, f"成功创建文件：{file_name}", [file_path])
+            
+        except PermissionError as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"path": parent_path, "file_name": file_name, "operation": "create_file"},
+                category=ErrorCategory.FILE_PERMISSION
+            )
+            return FileOperationResult(False, "权限不足，无法创建文件")
         except Exception as e:
-            error_msg = f"无法创建文件: {str(e)}"
-            result = FileOperationResult(False, error_msg, error_details=str(e))
-            self.operation_finished.emit("create_file", result)
-            return result
+            self.error_manager.handle_exception(
+                e,
+                context={"path": parent_path, "file_name": file_name, "operation": "create_file"},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, f"创建文件失败：{str(e)}")
     
-    def delete_files(self, file_paths: List[str], confirm: bool = True, force_sync: bool = False) -> FileOperationResult:
+    def delete_files(self, file_paths: List[str], confirm: bool = True) -> FileOperationResult:
         """
-        删除多个文件或文件夹
+        删除多个文件或文件夹（支持异步操作）
         
         Args:
             file_paths: 要删除的文件路径列表
-            confirm: 是否需要用户确认
-            force_sync: 强制使用同步操作（忽略异步阈值）
+            confirm: 是否需要确认
             
         Returns:
             FileOperationResult: 操作结果
@@ -324,312 +421,489 @@ class FileOperationManager(QObject):
         if not file_paths:
             return FileOperationResult(False, "没有选择要删除的文件")
         
-        # 过滤出存在的文件
-        existing_paths = [path for path in file_paths if os.path.exists(path)]
-        if not existing_paths:
-            return FileOperationResult(False, "选中的文件或文件夹都不存在")
+        # 检查异步操作条件
+        if self.enable_async and len(file_paths) >= self.async_delete_threshold:
+            try:
+                operation_id = self.async_manager.async_delete_files(file_paths, confirm)
+                return FileOperationResult(True, f"开始异步删除 {len(file_paths)} 个文件", file_paths)
+            except Exception as e:
+                self.error_manager.handle_exception(
+                    e,
+                    context={"operation": "async_delete", "file_count": len(file_paths)},
+                    category=ErrorCategory.FILE_OPERATION
+                )
+                # 异步失败时回退到同步操作
         
-        # 检查权限
-        permission_result = self._check_operation_permission(existing_paths, "删除")
-        if not permission_result.success:
-            return permission_result
-        
-        # 用户确认
-        if confirm and self.parent_widget:
-            if not self._confirm_delete_operation(existing_paths):
-                return FileOperationResult(False, "用户取消了删除操作")
-        
-        # 决定是否使用异步操作
-        should_use_async = (
-            not force_sync and 
-            self.enable_async and 
-            self.async_manager and 
-            len(existing_paths) >= self.async_threshold.get('delete', 10)
-        )
-        
-        if should_use_async:
-            # 使用异步操作
-            operation_id = self.async_manager.delete_files_async(existing_paths, show_progress=True)
-            logger.info(f"Started async delete operation {operation_id} for {len(existing_paths)} files")
-            # 返回异步操作结果，包含operation_id
-            return FileOperationResult(
-                True, 
-                f"正在异步删除 {len(existing_paths)} 个项目...", 
-                existing_paths,
-                error_details=f"async_operation_id:{operation_id}"
-            )
-        else:
-            # 使用同步操作（原有逻辑）
-            self.operation_started.emit("delete", existing_paths)
-            success_count = 0
-            failed_items = []
+        # 同步删除操作
+        try:
+            if confirm:
+                reply = QMessageBox.question(
+                    self.parent_widget, "确认删除",
+                    f"确定要删除选中的 {len(file_paths)} 个项目吗？\n\n注意：此操作不可撤销！",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return FileOperationResult(False, "用户取消删除操作")
             
-            for i, file_path in enumerate(existing_paths):
-                self.progress_updated.emit(i + 1, len(existing_paths))
+            deleted_files = []
+            failed_files = []
+            
+            for file_path in file_paths:
                 try:
-                    if os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
+                    if os.path.exists(file_path):
+                        if os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                        else:
+                            os.remove(file_path)
+                        deleted_files.append(file_path)
                     else:
-                        os.remove(file_path)
-                    success_count += 1
+                        failed_files.append(f"{file_path} (文件不存在)")
+                except PermissionError as e:
+                    failed_files.append(f"{file_path} (权限不足)")
+                    self.error_manager.handle_exception(
+                        e,
+                        context={"path": file_path, "operation": "delete"},
+                        show_dialog=False,  # 不单独显示，在结果中统一处理
+                        category=ErrorCategory.FILE_PERMISSION
+                    )
                 except Exception as e:
-                    failed_items.append(f"{os.path.basename(file_path)}: {str(e)}")
+                    failed_files.append(f"{file_path} (删除失败: {str(e)})")
+                    self.error_manager.handle_exception(
+                        e,
+                        context={"path": file_path, "operation": "delete"},
+                        show_dialog=False,
+                        category=ErrorCategory.FILE_OPERATION
+                    )
             
-            # 构建结果
-            if failed_items:
-                error_message = "以下项目删除失败：\n" + "\n".join(failed_items)
-                result = FileOperationResult(False, error_message, 
-                                           existing_paths[:success_count], 
-                                           error_details=str(failed_items))
+            # 生成结果
+            if failed_files:
+                if deleted_files:
+                    message = f"部分删除成功：成功删除 {len(deleted_files)} 个文件，{len(failed_files)} 个失败"
+                    details = "失败的文件：\n" + "\n".join(failed_files[:10])  # 限制显示数量
+                    if len(failed_files) > 10:
+                        details += f"\n还有 {len(failed_files) - 10} 个失败..."
+                else:
+                    message = f"删除全部失败：{len(failed_files)} 个文件删除失败"
+                    details = "失败的文件：\n" + "\n".join(failed_files[:10])
+                    if len(failed_files) > 10:
+                        details += f"\n还有 {len(failed_files) - 10} 个失败..."
+                
+                # 显示部分失败的错误信息
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_OPERATION,
+                    ErrorSeverity.WARNING if deleted_files else ErrorSeverity.ERROR,
+                    message,
+                    details=details,
+                    context={"deleted_count": len(deleted_files), "failed_count": len(failed_files)}
+                )
+                
+                return FileOperationResult(bool(deleted_files), message, deleted_files, details)
             else:
-                result = FileOperationResult(True, f"成功删除 {success_count} 个项目", existing_paths)
-            
-            self.operation_finished.emit("delete", result)
-            return result
+                message = f"成功删除 {len(deleted_files)} 个文件"
+                return FileOperationResult(True, message, deleted_files)
+                
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "delete_files", "file_count": len(file_paths)},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, f"删除操作失败：{str(e)}")
     
     def rename_file(self, file_path: str, new_name: str = None) -> FileOperationResult:
         """
         重命名文件或文件夹
         
         Args:
-            file_path: 要重命名的文件路径
-            new_name: 新名称，如果为None则弹出输入框
+            file_path: 原文件路径
+            new_name: 新名称（如果为None则弹出输入框）
             
         Returns:
             FileOperationResult: 操作结果
         """
-        if not os.path.exists(file_path):
-            return FileOperationResult(False, "文件或文件夹不存在")
-        
-        # 检查权限
-        permission_result = self._check_operation_permission([file_path], "重命名")
-        if not permission_result.success:
-            return permission_result
-        
-        old_name = os.path.basename(file_path)
-        
-        # 如果没有提供新名称，弹出输入框
-        if new_name is None:
-            if not self.parent_widget:
-                return FileOperationResult(False, "无法获取新名称：缺少父窗口")
-            
-            new_name, ok = QInputDialog.getText(
-                self.parent_widget, "重命名", 
-                f"请输入新名称:", text=old_name
-            )
-            
-            if not ok or not new_name.strip():
-                return FileOperationResult(False, "操作已取消")
-            
-            new_name = new_name.strip()
-        
-        if new_name == old_name:
-            return FileOperationResult(False, "新名称与原名称相同")
-        
-        new_path = os.path.join(os.path.dirname(file_path), new_name)
-        
-        if os.path.exists(new_path):
-            return FileOperationResult(False, f"名称 '{new_name}' 已经存在")
-        
         try:
-            self.operation_started.emit("rename", [file_path])
+            if not os.path.exists(file_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_NOT_FOUND,
+                    ErrorSeverity.ERROR,
+                    f"文件不存在：{file_path}",
+                    context={"path": file_path, "operation": "rename"}
+                )
+                return FileOperationResult(False, "文件不存在")
+            
+            current_name = os.path.basename(file_path)
+            
+            if new_name is None:
+                new_name, ok = QInputDialog.getText(
+                    self.parent_widget,
+                    "重命名",
+                    "请输入新名称:",
+                    text=current_name
+                )
+                
+                if not ok or not new_name.strip():
+                    return FileOperationResult(False, "用户取消重命名操作")
+                
+                new_name = new_name.strip()
+            
+            if new_name == current_name:
+                return FileOperationResult(False, "新名称与原名称相同")
+            
+            # 检查新名称是否包含非法字符
+            illegal_chars = '<>:"/\\|?*'
+            for char in illegal_chars:
+                if char in new_name:
+                    self.error_manager.handle_error(
+                        ErrorCategory.USER_INPUT,
+                        ErrorSeverity.WARNING,
+                        f"文件名包含非法字符：{char}",
+                        details=f"文件名不能包含以下字符：{illegal_chars}",
+                        context={"new_name": new_name, "illegal_char": char}
+                    )
+                    return FileOperationResult(False, f"文件名包含非法字符：{char}")
+            
+            parent_dir = os.path.dirname(file_path)
+            new_path = os.path.join(parent_dir, new_name)
+            
+            # 检查新路径是否已存在
+            if os.path.exists(new_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_OPERATION,
+                    ErrorSeverity.WARNING,
+                    f"目标名称已存在：{new_name}",
+                    context={"new_path": new_path, "operation": "rename"}
+                )
+                return FileOperationResult(False, f"目标名称已存在：{new_name}")
+            
+            # 执行重命名
             os.rename(file_path, new_path)
-            result = FileOperationResult(True, f"成功重命名为: {new_name}", [new_path])
-            self.operation_finished.emit("rename", result)
-            return result
+            
+            return FileOperationResult(True, f"成功重命名为：{new_name}", [new_path])
+            
+        except PermissionError as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"path": file_path, "new_name": new_name, "operation": "rename"},
+                category=ErrorCategory.FILE_PERMISSION
+            )
+            return FileOperationResult(False, "权限不足，无法重命名")
         except Exception as e:
-            error_msg = f"无法重命名: {str(e)}"
-            result = FileOperationResult(False, error_msg, error_details=str(e))
-            self.operation_finished.emit("rename", result)
-            return result
+            self.error_manager.handle_exception(
+                e,
+                context={"path": file_path, "new_name": new_name, "operation": "rename"},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, f"重命名失败：{str(e)}")
     
     # ========== 剪贴板操作 ==========
     
     def copy_to_clipboard(self, file_paths: List[str]) -> FileOperationResult:
-        """复制文件到剪贴板"""
-        if not file_paths:
-            return FileOperationResult(False, "没有选择要复制的文件")
-        
-        # 检查权限
-        permission_result = self._check_operation_permission(file_paths, "复制")
-        if not permission_result.success:
-            return permission_result
-        
-        success = self.clipboard.copy(file_paths)
-        if success:
-            return FileOperationResult(True, f"已复制 {len(self.clipboard.items)} 个项目到剪贴板", 
-                                     self.clipboard.items)
-        else:
-            return FileOperationResult(False, "复制失败：没有有效的文件")
-    
-    def cut_to_clipboard(self, file_paths: List[str]) -> FileOperationResult:
-        """剪切文件到剪贴板"""
-        if not file_paths:
-            return FileOperationResult(False, "没有选择要剪切的文件")
-        
-        # 检查权限
-        permission_result = self._check_operation_permission(file_paths, "剪切")
-        if not permission_result.success:
-            return permission_result
-        
-        success = self.clipboard.cut(file_paths)
-        if success:
-            return FileOperationResult(True, f"已剪切 {len(self.clipboard.items)} 个项目到剪贴板", 
-                                     self.clipboard.items)
-        else:
-            return FileOperationResult(False, "剪切失败：没有有效的文件")
-    
-    def paste_from_clipboard(self, target_dir: str, force_sync: bool = False) -> FileOperationResult:
         """
-        从剪贴板粘贴文件
+        复制文件到剪贴板
         
         Args:
-            target_dir: 目标目录
-            force_sync: 强制使用同步操作（忽略异步阈值）
+            file_paths: 要复制的文件路径列表
             
         Returns:
             FileOperationResult: 操作结果
         """
-        if self.clipboard.is_empty():
-            return FileOperationResult(False, "剪贴板为空")
-        
-        if not os.path.exists(target_dir) or not os.path.isdir(target_dir):
-            return FileOperationResult(False, "目标路径不存在或不是文件夹")
-        
-        # 决定是否使用异步操作
-        should_use_async = (
-            not force_sync and 
-            self.enable_async and 
-            self.async_manager and 
-            len(self.clipboard.items) >= self.async_threshold.get('paste', 5)
-        )
-        
-        if should_use_async:
-            # 使用异步操作
-            if self.clipboard.operation == "copy":
-                operation_id = self.async_manager.copy_files_async(self.clipboard.items, target_dir, show_progress=True)
-                logger.info(f"Started async copy operation {operation_id} for {len(self.clipboard.items)} files")
-                message = f"正在异步复制 {len(self.clipboard.items)} 个项目..."
-            elif self.clipboard.operation == "cut":
-                operation_id = self.async_manager.move_files_async(self.clipboard.items, target_dir, show_progress=True)
-                logger.info(f"Started async move operation {operation_id} for {len(self.clipboard.items)} files")
-                # 对于剪切操作，需要在完成后清空剪贴板
-                # 连接完成信号来处理剪贴板清理
-                def clear_clipboard_after_move(op_id, result):
-                    if op_id == operation_id and result.get('success', False):
-                        self.clipboard.clear()
-                        logger.info("Clipboard cleared after successful move operation")
-                
-                self.async_manager.operation_completed.connect(clear_clipboard_after_move)
-                message = f"正在异步移动 {len(self.clipboard.items)} 个项目..."
-            else:
-                return FileOperationResult(False, "未知的剪贴板操作类型")
-            
-            # 返回异步操作结果
-            return FileOperationResult(
-                True, 
-                message, 
-                self.clipboard.items.copy(),
-                error_details=f"async_operation_id:{operation_id}"
-            )
-        else:
-            # 使用同步操作（原有逻辑）
-            self.operation_started.emit("paste", self.clipboard.items)
-            success_count = 0
-            error_count = 0
-            processed_files = []
-            
-            for i, source_path in enumerate(self.clipboard.items):
-                self.progress_updated.emit(i + 1, len(self.clipboard.items))
-                
-                if not os.path.exists(source_path):
-                    error_count += 1
-                    continue
-                
-                file_name = os.path.basename(source_path)
-                target_path = self._get_unique_target_path(target_dir, file_name)
-                
-                try:
-                    if self.clipboard.operation == "copy":
-                        if os.path.isdir(source_path):
-                            shutil.copytree(source_path, target_path)
-                        else:
-                            shutil.copy2(source_path, target_path)
-                    elif self.clipboard.operation == "cut":
-                        shutil.move(source_path, target_path)
-                    
-                    processed_files.append(target_path)
-                    success_count += 1
-                except Exception as e:
-                    logger.error(f"粘贴文件失败 {source_path}: {e}")
-                    error_count += 1
-            
-            # 如果是剪切操作，清空剪贴板
-            if self.clipboard.operation == "cut":
-                self.clipboard.clear()
-            
-            # 构建结果
-            if error_count > 0:
-                message = f"粘贴完成：成功 {success_count} 个，失败 {error_count} 个"
-                result = FileOperationResult(success_count > 0, message, processed_files)
-            else:
-                result = FileOperationResult(True, f"成功粘贴 {success_count} 个项目", processed_files)
-            
-            self.operation_finished.emit("paste", result)
-            return result
-    
-    def clear_clipboard(self):
-        """清空剪贴板"""
-        self.clipboard.clear()
-    
-    def get_clipboard_info(self) -> Dict[str, Any]:
-        """获取剪贴板信息"""
-        return {
-            "items": self.clipboard.items.copy(),
-            "operation": self.clipboard.operation,
-            "count": len(self.clipboard.items),
-            "is_empty": self.clipboard.is_empty()
-        }
-    
-    # ========== 文件系统操作 ==========
-    
-    def open_file(self, file_path: str) -> FileOperationResult:
-        """使用系统默认程序打开文件"""
-        if not os.path.exists(file_path):
-            return FileOperationResult(False, "文件不存在")
-        
-        if not os.path.isfile(file_path):
-            return FileOperationResult(False, "这不是一个文件")
-        
         try:
-            if sys.platform == "win32":
-                os.startfile(file_path)
-            elif sys.platform == "darwin":  # macOS
-                subprocess.call(["open", file_path])
-            else:  # Linux
-                subprocess.call(["xdg-open", file_path])
+            if not file_paths:
+                return FileOperationResult(False, "没有选择要复制的文件")
             
-            return FileOperationResult(True, f"已打开文件: {os.path.basename(file_path)}", [file_path])
+            # 检查文件是否存在
+            existing_files = []
+            missing_files = []
+            
+            for file_path in file_paths:
+                if os.path.exists(file_path):
+                    existing_files.append(file_path)
+                else:
+                    missing_files.append(file_path)
+            
+            if missing_files:
+                if existing_files:
+                    # 部分文件不存在
+                    self.error_manager.handle_error(
+                        ErrorCategory.FILE_NOT_FOUND,
+                        ErrorSeverity.WARNING,
+                        f"部分文件不存在，已忽略 {len(missing_files)} 个文件",
+                        details="不存在的文件：\n" + "\n".join(missing_files[:5]),
+                        context={"missing_count": len(missing_files), "existing_count": len(existing_files)}
+                    )
+                else:
+                    # 全部文件不存在
+                    self.error_manager.handle_error(
+                        ErrorCategory.FILE_NOT_FOUND,
+                        ErrorSeverity.ERROR,
+                        "所选文件都不存在",
+                        details="不存在的文件：\n" + "\n".join(missing_files[:5]),
+                        context={"missing_files": missing_files}
+                    )
+                    return FileOperationResult(False, "所选文件都不存在")
+            
+            # 设置剪贴板状态
+            self.clipboard_operation = "copy"
+            self.clipboard_items = existing_files
+            
+            return FileOperationResult(True, f"已复制 {len(existing_files)} 个项目到剪贴板", existing_files)
+            
         except Exception as e:
-            return FileOperationResult(False, f"无法打开文件: {str(e)}", error_details=str(e))
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "copy_to_clipboard", "file_count": len(file_paths)},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, f"复制到剪贴板失败：{str(e)}")
     
-    def open_in_explorer(self, dir_path: str) -> FileOperationResult:
-        """在文件管理器中打开目录"""
-        if not os.path.exists(dir_path):
-            return FileOperationResult(False, "目录不存在")
+    def cut_to_clipboard(self, file_paths: List[str]) -> FileOperationResult:
+        """
+        剪切文件到剪贴板
         
+        Args:
+            file_paths: 要剪切的文件路径列表
+            
+        Returns:
+            FileOperationResult: 操作结果
+        """
         try:
+            if not file_paths:
+                return FileOperationResult(False, "没有选择要剪切的文件")
+            
+            # 检查文件是否存在
+            existing_files = []
+            missing_files = []
+            
+            for file_path in file_paths:
+                if os.path.exists(file_path):
+                    existing_files.append(file_path)
+                else:
+                    missing_files.append(file_path)
+            
+            if missing_files:
+                if existing_files:
+                    # 部分文件不存在
+                    self.error_manager.handle_error(
+                        ErrorCategory.FILE_NOT_FOUND,
+                        ErrorSeverity.WARNING,
+                        f"部分文件不存在，已忽略 {len(missing_files)} 个文件",
+                        details="不存在的文件：\n" + "\n".join(missing_files[:5]),
+                        context={"missing_count": len(missing_files), "existing_count": len(existing_files)}
+                    )
+                else:
+                    # 全部文件不存在
+                    self.error_manager.handle_error(
+                        ErrorCategory.FILE_NOT_FOUND,
+                        ErrorSeverity.ERROR,
+                        "所选文件都不存在",
+                        details="不存在的文件：\n" + "\n".join(missing_files[:5]),
+                        context={"missing_files": missing_files}
+                    )
+                    return FileOperationResult(False, "所选文件都不存在")
+            
+            # 设置剪贴板状态
+            self.clipboard_operation = "cut"
+            self.clipboard_items = existing_files
+            
+            return FileOperationResult(True, f"已剪切 {len(existing_files)} 个项目到剪贴板", existing_files)
+            
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "cut_to_clipboard", "file_count": len(file_paths)},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, f"剪切到剪贴板失败：{str(e)}")
+
+    def paste_from_clipboard(self, target_dir: str) -> FileOperationResult:
+        """
+        从剪贴板粘贴文件（支持异步操作）
+        
+        Args:
+            target_dir: 目标目录
+            
+        Returns:
+            FileOperationResult: 操作结果
+        """
+        try:
+            if not self.clipboard_items:
+                return FileOperationResult(False, "剪贴板为空")
+            
+            if not os.path.exists(target_dir):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_NOT_FOUND,
+                    ErrorSeverity.ERROR,
+                    f"目标目录不存在：{target_dir}",
+                    context={"target_dir": target_dir, "operation": "paste"}
+                )
+                return FileOperationResult(False, "目标目录不存在")
+            
+            if not os.path.isdir(target_dir):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_OPERATION,
+                    ErrorSeverity.ERROR,
+                    f"目标路径不是目录：{target_dir}",
+                    context={"target_dir": target_dir, "operation": "paste"}
+                )
+                return FileOperationResult(False, "目标路径不是目录")
+            
+            # 检查异步操作条件
+            if self.enable_async and len(self.clipboard_items) >= self.async_paste_threshold:
+                try:
+                    operation_id = self.async_manager.async_paste_files(
+                        self.clipboard_items, 
+                        target_dir, 
+                        self.clipboard_operation == "cut"
+                    )
+                    return FileOperationResult(True, f"开始异步粘贴 {len(self.clipboard_items)} 个文件", self.clipboard_items)
+                except Exception as e:
+                    self.error_manager.handle_exception(
+                        e,
+                        context={"operation": "async_paste", "file_count": len(self.clipboard_items)},
+                        category=ErrorCategory.FILE_OPERATION
+                    )
+                    # 异步失败时回退到同步操作
+            
+            # 同步粘贴操作
+            success_count = 0
+            failed_files = []
+            successful_files = []
+            
+            for file_path in self.clipboard_items:
+                try:
+                    if not os.path.exists(file_path):
+                        failed_files.append(f"{file_path} (源文件不存在)")
+                        continue
+                    
+                    file_name = os.path.basename(file_path)
+                    target_path = os.path.join(target_dir, file_name)
+                    
+                    # 检查目标是否已存在
+                    if os.path.exists(target_path):
+                        # 生成新名称
+                        base, ext = os.path.splitext(file_name)
+                        counter = 1
+                        while os.path.exists(target_path):
+                            new_name = f"{base} - 副本 ({counter}){ext}"
+                            target_path = os.path.join(target_dir, new_name)
+                            counter += 1
+                    
+                    if self.clipboard_operation == "cut":
+                        # 移动文件
+                        shutil.move(file_path, target_path)
+                    else:
+                        # 复制文件
+                        if os.path.isdir(file_path):
+                            shutil.copytree(file_path, target_path)
+                        else:
+                            shutil.copy2(file_path, target_path)
+                    
+                    successful_files.append(target_path)
+                    success_count += 1
+                    
+                except PermissionError as e:
+                    failed_files.append(f"{file_path} (权限不足)")
+                    self.error_manager.handle_exception(
+                        e,
+                        context={"source": file_path, "target": target_dir, "operation": "paste"},
+                        show_dialog=False,
+                        category=ErrorCategory.FILE_PERMISSION
+                    )
+                except Exception as e:
+                    failed_files.append(f"{file_path} (操作失败: {str(e)})")
+                    self.error_manager.handle_exception(
+                        e,
+                        context={"source": file_path, "target": target_dir, "operation": "paste"},
+                        show_dialog=False,
+                        category=ErrorCategory.FILE_OPERATION
+                    )
+            
+            # 如果是剪切操作且成功，清空剪贴板
+            if self.clipboard_operation == "cut" and success_count > 0:
+                self.clipboard_items = []
+                self.clipboard_operation = None
+            
+            # 生成结果
+            if failed_files:
+                if successful_files:
+                    message = f"部分粘贴成功：成功粘贴 {len(successful_files)} 个文件，{len(failed_files)} 个失败"
+                    details = "失败的文件：\n" + "\n".join(failed_files[:10])
+                    if len(failed_files) > 10:
+                        details += f"\n还有 {len(failed_files) - 10} 个失败..."
+                else:
+                    message = f"粘贴全部失败：{len(failed_files)} 个文件粘贴失败"
+                    details = "失败的文件：\n" + "\n".join(failed_files[:10])
+                    if len(failed_files) > 10:
+                        details += f"\n还有 {len(failed_files) - 10} 个失败..."
+                
+                # 显示部分失败的错误信息
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_OPERATION,
+                    ErrorSeverity.WARNING if successful_files else ErrorSeverity.ERROR,
+                    message,
+                    details=details,
+                    context={"success_count": len(successful_files), "failed_count": len(failed_files)}
+                )
+                
+                return FileOperationResult(bool(successful_files), message, successful_files, details)
+            else:
+                operation_name = "移动" if self.clipboard_operation == "cut" else "复制"
+                message = f"成功{operation_name} {len(successful_files)} 个文件"
+                return FileOperationResult(True, message, successful_files)
+                
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"operation": "paste_from_clipboard", "target_dir": target_dir},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, f"粘贴操作失败：{str(e)}")
+
+    def get_clipboard_info(self) -> Dict[str, Any]:
+        """
+        获取剪贴板信息
+        
+        Returns:
+            dict: 剪贴板信息
+        """
+        return {
+            "operation": self.clipboard_operation,
+            "items": self.clipboard_items.copy(),
+            "count": len(self.clipboard_items)
+        }
+
+    # ========== 文件系统操作 ==========
+
+    def open_in_explorer(self, dir_path: str) -> FileOperationResult:
+        """在Windows资源管理器中打开目录"""
+        try:
+            if not os.path.exists(dir_path):
+                self.error_manager.handle_error(
+                    ErrorCategory.FILE_NOT_FOUND,
+                    ErrorSeverity.ERROR,
+                    f"目录不存在：{dir_path}",
+                    context={"path": dir_path, "operation": "open_in_explorer"}
+                )
+                return FileOperationResult(False, "目录不存在")
+            
             if sys.platform == "win32":
-                os.startfile(dir_path)
-            elif sys.platform == "darwin":  # macOS
-                subprocess.call(["open", dir_path])
-            else:  # Linux
+                subprocess.call(["explorer", dir_path])
+            elif sys.platform == "darwin":
+                subprocess.call(["open", "-R", dir_path])
+            else:
                 subprocess.call(["xdg-open", dir_path])
             
-            return FileOperationResult(True, f"已在文件管理器中打开: {os.path.basename(dir_path)}", [dir_path])
+            return FileOperationResult(True, f"已在资源管理器中打开：{dir_path}", [dir_path])
+            
         except Exception as e:
-            return FileOperationResult(False, f"无法打开目录: {str(e)}", error_details=str(e))
-    
+            self.error_manager.handle_exception(
+                e,
+                context={"path": dir_path, "operation": "open_in_explorer"},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, f"无法打开资源管理器：{str(e)}")
+
     # ========== 异步操作控制 ==========
     
     def set_async_enabled(self, enabled: bool):
@@ -650,7 +924,7 @@ class FileOperationManager(QObject):
             except Exception as e:
                 logger.error(f"Failed to initialize async operations: {e}")
                 self.enable_async = False
-                return False
+                self.async_manager = None
         
         return True
     

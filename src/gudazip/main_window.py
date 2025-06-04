@@ -21,6 +21,7 @@ from .ui.file_browser import FileBrowser
 from .ui.create_archive_dialog import CreateArchiveDialog
 from .ui.extract_archive_dialog import ExtractArchiveDialog
 from .core.archive_manager import ArchiveManager
+from .core.error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
 
 
 class MainWindow(QMainWindow):
@@ -28,7 +29,8 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.archive_manager = ArchiveManager()
+        self.archive_manager = ArchiveManager(self)
+        self.error_manager = get_error_manager(self)
         
         self.init_ui()
         self.setup_actions()
