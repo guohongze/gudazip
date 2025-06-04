@@ -2,6 +2,7 @@
 """
 文件浏览器组件
 实现左侧的文件系统树状导航
+重构版本：UI和业务逻辑分离，使用专门的操作管理器
 """
 
 from PySide6.QtCore import Qt, QDir, Signal, QModelIndex, QStandardPaths, QSize
@@ -39,8 +40,10 @@ if sys.platform == "win32":
 else:
     HAS_WIN32 = False
 
-# 导入信号管理器
+# 导入管理器
 from ..core.signal_manager import get_signal_manager
+from ..core.file_operation_manager import FileOperationManager
+from ..core.archive_operation_manager import ArchiveOperationManager
 
 
 class EnhancedIconProvider(QFileIconProvider):
@@ -121,7 +124,7 @@ class EnhancedIconProvider(QFileIconProvider):
 
 
 class FileBrowser(QWidget):
-    """文件浏览器组件"""
+    """文件浏览器组件 - 重构版本"""
     
     # 信号：文件被选中
     fileSelected = Signal(str)
@@ -133,9 +136,6 @@ class FileBrowser(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_view_mode = "详细信息"  # 当前视图模式
-        # 剪贴板操作相关
-        self.clipboard_items = []  # 剪贴板中的文件路径
-        self.clipboard_operation = ""  # "copy" 或 "cut"
         
         # 压缩包查看模式相关
         self.archive_viewing_mode = False  # 是否处于压缩包查看模式
@@ -144,14 +144,49 @@ class FileBrowser(QWidget):
         self.archive_current_dir = ""  # 压缩包内当前目录
         self.archive_file_list = []  # 压缩包文件列表
         
-        # 初始化信号管理器
-        self.signal_manager = get_signal_manager(debug_mode=True)  # 开启调试模式
+        # 初始化管理器
+        self.signal_manager = get_signal_manager(debug_mode=True)
+        self.file_operation_manager = FileOperationManager(self)
+        self.archive_operation_manager = ArchiveOperationManager(self)
+        
+        # 连接操作管理器的信号
+        self._connect_operation_signals()
         
         # 设置焦点策略，使其能接收键盘事件
         self.setFocusPolicy(Qt.StrongFocus)
         
         self.init_ui()
         
+    def _connect_operation_signals(self):
+        """连接操作管理器的信号"""
+        # 文件操作管理器信号
+        self.file_operation_manager.operation_finished.connect(self._on_file_operation_finished)
+        
+        # 压缩包操作管理器信号
+        self.archive_operation_manager.operation_finished.connect(self._on_archive_operation_finished)
+        
+    def _on_file_operation_finished(self, operation_type: str, result):
+        """处理文件操作完成信号"""
+        if not result.success and result.message:
+            QMessageBox.warning(self, "操作失败", result.message)
+        elif result.success and operation_type in ["delete", "rename", "create_folder", "create_file", "paste"]:
+            # 对于修改文件系统的操作，刷新视图
+            self.refresh_view()
+    
+    def _on_archive_operation_finished(self, operation_type: str, result):
+        """处理压缩包操作完成信号"""
+        if not result.success and result.message:
+            QMessageBox.warning(self, "操作失败", result.message)
+        elif result.success and operation_type in ["rename_file", "delete_file"]:
+            # 对于修改压缩包的操作，刷新压缩包视图
+            self.refresh_archive_view()
+        
+        # 显示成功消息
+        if result.success and result.message:
+            # 对于某些操作可以显示成功消息
+            if operation_type in ["extract_file", "extract_archive"]:
+                QMessageBox.information(self, "操作成功", result.message)
+    
     def init_ui(self):
         """初始化用户界面"""
         layout = QVBoxLayout(self)
@@ -297,34 +332,8 @@ class FileBrowser(QWidget):
             }
         """)
         
-        # 获取Windows标准路径
-        desktop_path = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
-        documents_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
-        downloads_path = QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
-        pictures_path = QStandardPaths.writableLocation(QStandardPaths.PicturesLocation)
-        videos_path = QStandardPaths.writableLocation(QStandardPaths.MoviesLocation)
-        music_path = QStandardPaths.writableLocation(QStandardPaths.MusicLocation)
-        home_path = QStandardPaths.writableLocation(QStandardPaths.HomeLocation)
-        
-        # 添加Windows11风格图标到下拉框 - 使用更大的emoji图标
-        windows_paths = [
-            ("🖥️  桌面", desktop_path),
-            ("💻  此电脑", ""),  # 特殊处理
-            ("📂  文档", documents_path),
-            ("🖼️  图片", pictures_path),
-            ("⬇️  下载", downloads_path),
-            ("🎬  视频", videos_path),
-            ("🎵  音乐", music_path),
-            ("👤  用户", home_path),
-        ]
-        
-        for name, path in windows_paths:
-            if path == "" or os.path.exists(path):
-                if path == "":
-                    # 此电脑特殊处理
-                    self.path_combo.addItem(name, "ThisPC")
-                else:
-                    self.path_combo.addItem(name, path)
+        # 获取Windows标准路径并初始化下拉框
+        self._init_path_combo()
         
         # 现在连接信号（在模型创建之后）
         self.path_combo.currentTextChanged.connect(self.handle_location_selection)
@@ -460,6 +469,65 @@ class FileBrowser(QWidget):
         self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_view.customContextMenuRequested.connect(self.show_list_context_menu)
         
+        # 为视图添加样式
+        self._apply_view_styles()
+        
+        # 设置默认路径为桌面
+        desktop_path = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
+        self.set_root_path(desktop_path)
+        
+        # 设置树视图的列显示
+        self.setup_tree_columns()
+        
+        # 初始化向上按钮状态
+        self.update_up_button_state()
+        
+        # 连接信号
+        self.tree_view.clicked.connect(self.on_item_clicked)
+        self.tree_view.doubleClicked.connect(self.on_item_double_clicked)
+        self.tree_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
+        
+        self.list_view.clicked.connect(self.on_item_clicked)
+        self.list_view.doubleClicked.connect(self.on_item_double_clicked)
+        self.list_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
+        
+        # 默认显示详细信息视图
+        layout.addWidget(self.tree_view)
+        self.current_view = self.tree_view
+        self.list_view.hide()
+
+    def _init_path_combo(self):
+        """初始化路径下拉框"""
+        desktop_path = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
+        documents_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+        downloads_path = QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
+        pictures_path = QStandardPaths.writableLocation(QStandardPaths.PicturesLocation)
+        videos_path = QStandardPaths.writableLocation(QStandardPaths.MoviesLocation)
+        music_path = QStandardPaths.writableLocation(QStandardPaths.MusicLocation)
+        home_path = QStandardPaths.writableLocation(QStandardPaths.HomeLocation)
+        
+        # 添加Windows11风格图标到下拉框 - 使用更大的emoji图标
+        windows_paths = [
+            ("🖥️  桌面", desktop_path),
+            ("💻  此电脑", ""),  # 特殊处理
+            ("📂  文档", documents_path),
+            ("🖼️  图片", pictures_path),
+            ("⬇️  下载", downloads_path),
+            ("🎬  视频", videos_path),
+            ("🎵  音乐", music_path),
+            ("👤  用户", home_path),
+        ]
+        
+        for name, path in windows_paths:
+            if path == "" or os.path.exists(path):
+                if path == "":
+                    # 此电脑特殊处理
+                    self.path_combo.addItem(name, "ThisPC")
+                else:
+                    self.path_combo.addItem(name, path)
+
+    def _apply_view_styles(self):
+        """应用视图样式"""
         # 为树视图添加样式
         self.tree_view.setStyleSheet("""
             QTreeView {
@@ -569,29 +637,6 @@ class FileBrowser(QWidget):
                 outline: none;
             }
         """)
-        
-        # 设置默认路径为桌面
-        self.set_root_path(desktop_path)
-        
-        # 设置树视图的列显示
-        self.setup_tree_columns()
-        
-        # 初始化向上按钮状态
-        self.update_up_button_state()
-        
-        # 连接信号
-        self.tree_view.clicked.connect(self.on_item_clicked)
-        self.tree_view.doubleClicked.connect(self.on_item_double_clicked)
-        self.tree_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
-        
-        self.list_view.clicked.connect(self.on_item_clicked)
-        self.list_view.doubleClicked.connect(self.on_item_double_clicked)
-        self.list_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
-        
-        # 默认显示详细信息视图
-        layout.addWidget(self.tree_view)
-        self.current_view = self.tree_view
-        self.list_view.hide()
         
     def setup_tree_columns(self):
         """设置树视图的列"""
@@ -1214,204 +1259,282 @@ class FileBrowser(QWidget):
 
     def open_file(self, file_path):
         """打开文件"""
-        if not os.path.exists(file_path):
-            QMessageBox.warning(self, "错误", "文件不存在")
-            return
-            
-        if os.path.isfile(file_path):
-            # 检查是否为压缩文件
-            if self.is_archive_file(file_path):
-                # 压缩文件，发送打开压缩包信号
-                self.archiveOpenRequested.emit(file_path)
-                return
-                
-            try:
-                if sys.platform == "win32":
-                    os.startfile(file_path)
-                elif sys.platform == "darwin":  # macOS
-                    subprocess.call(["open", file_path])
-                else:  # Linux
-                    subprocess.call(["xdg-open", file_path])
-            except Exception as e:
-                QMessageBox.warning(self, "打开文件失败", f"无法打开文件: {str(e)}")
+        if self.archive_operation_manager.is_supported_archive(file_path):
+            # 压缩文件，发送打开压缩包信号
+            self.archiveOpenRequested.emit(file_path)
         else:
-            QMessageBox.warning(self, "错误", "这不是一个文件")
+            # 普通文件，使用文件操作管理器打开
+            self.file_operation_manager.open_file(file_path)
             
     def open_folder(self, folder_path):
         """打开文件夹（进入该文件夹）"""
-        if not os.path.exists(folder_path):
-            QMessageBox.warning(self, "错误", "文件夹不存在")
-            return
-            
-        if os.path.isdir(folder_path):
+        if os.path.exists(folder_path) and os.path.isdir(folder_path):
             self.set_root_path(folder_path)
         else:
-            QMessageBox.warning(self, "错误", "这不是一个文件夹")
-
-    def delete_file(self, file_path):
-        """删除单个文件或文件夹（兼容方法）"""
-        self.delete_files([file_path])
+            QMessageBox.warning(self, "错误", "文件夹不存在或不是文件夹")
 
     def delete_files(self, file_paths):
         """删除多个文件或文件夹"""
-        if not file_paths:
-            return
-            
-        # 过滤出存在的文件
-        existing_paths = [path for path in file_paths if os.path.exists(path)]
-        if not existing_paths:
-            QMessageBox.warning(self, "错误", "选中的文件或文件夹都不存在")
-            return
-            
-        # 检查是否需要管理员权限
-        if not self.request_admin_if_needed(existing_paths, "删除"):
-            return
-            
-        # 统计文件和文件夹数量
-        folders = [path for path in existing_paths if os.path.isdir(path)]
-        files = [path for path in existing_paths if os.path.isfile(path)]
+        self.file_operation_manager.delete_files(file_paths, confirm=True)
+
+    def rename_file(self, file_path):
+        """重命名文件或文件夹"""
+        self.file_operation_manager.rename_file(file_path)
         
-        # 构建确认消息
-        if len(existing_paths) == 1:
-            file_name = os.path.basename(existing_paths[0])
-            if os.path.isdir(existing_paths[0]):
-                message = f"确定要删除文件夹 '{file_name}' 及其所有内容吗？\n这个操作不可撤销。"
-            else:
-                message = f"确定要删除文件 '{file_name}' 吗？\n这个操作不可撤销。"
-        else:
-            items = []
-            if folders:
-                items.append(f"{len(folders)} 个文件夹")
-            if files:
-                items.append(f"{len(files)} 个文件")
-            items_text = "和".join(items)
-            message = f"确定要删除 {items_text} 吗？\n"
-            if folders:
-                message += "文件夹及其所有内容将被删除。\n"
-            message += "这个操作不可撤销。"
+    def create_folder(self, parent_path):
+        """在指定路径创建新文件夹"""
+        self.file_operation_manager.create_folder(parent_path)
+                
+    def create_file(self, parent_path):
+        """在指定路径创建新文件"""
+        self.file_operation_manager.create_file(parent_path)
+                
+    def copy_items(self, file_paths):
+        """复制文件到剪贴板"""
+        self.file_operation_manager.copy_to_clipboard(file_paths)
             
+    def cut_items(self, file_paths):
+        """剪切文件到剪贴板"""
+        self.file_operation_manager.cut_to_clipboard(file_paths)
+            
+    def paste_items(self, target_dir):
+        """粘贴剪贴板中的文件"""
+        self.file_operation_manager.paste_from_clipboard(target_dir)
+            
+    def open_in_explorer(self, dir_path):
+        """在Windows资源管理器中打开目录"""
+        self.file_operation_manager.open_in_explorer(dir_path)
+
+    def open_archive_file(self, file_path):
+        """解压并打开压缩包中的文件"""
+        if not self.archive_viewing_mode:
+            return
+        self.archive_operation_manager.open_archive_file(self.archive_path, file_path)
+        
+    def extract_archive_file(self, file_path):
+        """解压压缩包中的单个文件到临时目录"""
+        if not self.archive_viewing_mode:
+            return
+        self.archive_operation_manager.show_file_in_explorer(self.archive_path, file_path)
+
+    def rename_archive_file(self, file_path, current_name):
+        """重命名压缩包内的文件或文件夹"""
+        if not self.archive_viewing_mode:
+            return
+        self.archive_operation_manager.rename_archive_file(self.archive_path, file_path)
+
+    def delete_archive_file(self, file_path):
+        """删除压缩包内的文件"""
+        if not self.archive_viewing_mode:
+            return
+        self.archive_operation_manager.delete_archive_file(self.archive_path, file_path)
+
+    def copy_archive_items(self, file_paths):
+        """复制压缩包内的文件到剪贴板"""
+        # 这里暂时保留简化的实现，因为压缩包内的复制粘贴比较复杂
+        if not hasattr(self, 'archive_clipboard_items'):
+            self.archive_clipboard_items = []
+        self.archive_clipboard_items = file_paths.copy()
+        print(f"📋 已复制压缩包内文件: {file_paths}")
+
+    def open_archive_folder_in_explorer(self):
+        """在资源管理器中打开当前压缩包所在文件夹"""
+        if not self.archive_viewing_mode:
+            return
+        self.archive_operation_manager.open_archive_folder_in_explorer(self.archive_path)
+
+    def refresh_archive_view(self):
+        """刷新压缩包内容显示"""
+        if not self.archive_viewing_mode or not self.archive_path:
+            return
+        
+        # 使用压缩包操作管理器重新获取文件列表
+        result = self.archive_operation_manager.list_archive_contents(self.archive_path)
+        if result.success:
+            # 转换回原来的格式以兼容现有代码
+            self.archive_file_list = [file_info.to_dict() for file_info in result.data]
+            # 重新显示当前目录内容
+            self.display_archive_directory_content()
+
+    def get_clipboard_info(self):
+        """获取剪贴板信息"""
+        return self.file_operation_manager.get_clipboard_info()
+
+    @property 
+    def clipboard_items(self):
+        """兼容性属性：获取剪贴板项目"""
+        info = self.file_operation_manager.get_clipboard_info()
+        return info["items"]
+
+    def is_archive_file(self, file_path):
+        """检查文件是否为支持的压缩包格式"""
+        return self.archive_operation_manager.is_supported_archive(file_path)
+
+    def request_admin_if_needed(self, file_paths, operation="操作"):
+        """如果需要管理员权限，则申请权限"""
+        from ..core.permission_manager import PermissionManager
+        return PermissionManager.request_admin_if_needed(file_paths, operation)
+        
+    def is_admin(self):
+        """检查当前是否有管理员权限"""
+        from ..core.permission_manager import PermissionManager
+        return PermissionManager.is_admin()
+
+    def enter_archive_mode(self, archive_path, archive_file_list):
+        """进入压缩包查看模式"""
+        try:
+            self.archive_viewing_mode = True
+            self.archive_path = archive_path
+            self.archive_file_list = archive_file_list
+            self.archive_current_dir = ""
+            
+            # 创建压缩包内容模型
+            self.archive_model = QStandardItemModel()
+            
+            # 设置视图使用压缩包模型
+            if hasattr(self, 'tree_view') and self.tree_view:
+                self.tree_view.setModel(self.archive_model)
+            if hasattr(self, 'list_view') and self.list_view:
+                self.list_view.setModel(self.archive_model)
+            
+            # 显示压缩包根目录内容
+            self.display_archive_directory_content()
+            
+            # 设置列宽
+            if hasattr(self, 'setup_tree_columns'):
+                self.setup_tree_columns()
+            
+            # 更新向上按钮状态
+            if hasattr(self, 'update_up_button_state'):
+                self.update_up_button_state()
+            
+            # 更新路径显示
+            if hasattr(self, 'path_combo') and self.path_combo:
+                # 使用信号管理器安全地更新路径，避免触发handle_location_selection
+                with self.signal_manager.block_signal(
+                    self.path_combo.currentTextChanged, 
+                    self.handle_location_selection,
+                    "archive_path_update"
+                ):
+                    self.path_combo.lineEdit().setText(os.path.basename(archive_path))
+            
+        except Exception as e:
+            print(f"进入压缩包模式失败: {e}")
+            import traceback
+            print(f"详细错误: {traceback.format_exc()}")
+    
+    def exit_archive_mode(self):
+        """退出压缩包查看模式"""
+        self.archive_viewing_mode = False
+        self.archive_path = None
+        self.archive_file_list = []
+        self.archive_current_dir = ""
+        self.archive_model = None
+        
+        # 恢复文件系统模型
+        self.tree_view.setModel(self.file_model)
+        self.list_view.setModel(self.file_model)
+        
+        # 更新向上按钮状态
+        self.update_up_button_state() 
+
+    def paste_to_archive(self):
+        """粘贴压缩包内复制的文件到当前位置"""
+        if not hasattr(self, 'archive_clipboard_items') or not self.archive_clipboard_items:
+            QMessageBox.warning(self, "错误", "没有可粘贴的压缩包内容")
+            return
+        
+        QMessageBox.information(
+            self, "功能提示", 
+            "在压缩包内移动/复制文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
+        )
+    
+    def paste_files_to_archive(self):
+        """将系统剪贴板中的文件粘贴到压缩包中"""
+        if not self.clipboard_items:
+            QMessageBox.warning(self, "错误", "没有可粘贴的文件")
+            return
+        
+        # 检查文件是否存在
+        existing_files = [f for f in self.clipboard_items if os.path.exists(f)]
+        if not existing_files:
+            QMessageBox.warning(self, "错误", "剪贴板中的文件不存在")
+            return
+        
         reply = QMessageBox.question(
-            self, "确认删除", 
-            message,
+            self, "确认粘贴", 
+            f"确定要将 {len(existing_files)} 个文件添加到压缩包中吗？\n注意：这需要重新创建压缩包。",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
-            success_count = 0
-            failed_items = []
-            
-            for file_path in existing_paths:
-                try:
-                    if os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
-                    else:
-                        os.remove(file_path)
-                    success_count += 1
-                except Exception as e:
-                    failed_items.append(f"{os.path.basename(file_path)}: {str(e)}")
-            
-            # 刷新视图
-            self.refresh_view()
-            
-            # 显示结果（只显示失败信息，不显示成功信息）
-            if failed_items:
-                error_message = "以下项目删除失败：\n" + "\n".join(failed_items)
-                QMessageBox.critical(self, "删除失败", error_message)
+            QMessageBox.information(
+                self, "功能提示", 
+                "向压缩包中添加文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
+            )
 
-    def rename_file(self, file_path):
-        """重命名文件或文件夹"""
-        if not os.path.exists(file_path):
-            QMessageBox.warning(self, "错误", "文件或文件夹不存在")
-            return
-            
-        # 检查是否需要管理员权限
-        if not self.request_admin_if_needed(file_path, "重命名"):
-            return
-            
-        old_name = os.path.basename(file_path)
-        new_name, ok = QInputDialog.getText(
-            self, "重命名", 
-            f"请输入新名称:", 
-            text=old_name
-        )
+    def force_exit_archive_mode(self):
+        """强制退出压缩包模式 - 独立的退出逻辑"""
+        # 重置所有压缩包相关状态
+        self.archive_viewing_mode = False
+        self.archive_path = None
+        self.archive_file_list = []
+        self.archive_current_dir = ""
+        self.archive_model = None
         
-        if ok and new_name and new_name != old_name:
-            if not new_name.strip():
-                QMessageBox.warning(self, "错误", "名称不能为空")
-                return
-                
-            new_path = os.path.join(os.path.dirname(file_path), new_name)
+        # 恢复文件系统模型
+        self.tree_view.setModel(self.file_model)
+        self.list_view.setModel(self.file_model)
+        
+        # 通知主窗口也退出压缩包模式
+        parent_widget = self.parent()
+        while parent_widget:
+            if hasattr(parent_widget, 'exit_archive_mode'):
+                parent_widget.exit_archive_mode()
+                break
+            parent_widget = parent_widget.parent()
+    
+    def force_navigate_to_path(self, target_path):
+        """强制导航到指定路径 - 独立的导航逻辑"""
+        if target_path == "ThisPC":
+            # 处理"此电脑"
+            self.file_model.setRootPath("")
+            self.tree_view.setRootIndex(self.file_model.index(""))
+            self.list_view.setRootIndex(self.file_model.index(""))
+        elif os.path.exists(target_path):
+            # 处理真实路径
+            self.file_model.setRootPath(target_path)
+            root_index = self.file_model.index(target_path)
+            self.tree_view.setRootIndex(root_index)
+            self.list_view.setRootIndex(root_index)
             
-            if os.path.exists(new_path):
-                QMessageBox.warning(self, "错误", f"名称 '{new_name}' 已经存在")
-                return
-                
-            try:
-                os.rename(file_path, new_path)
-                self.refresh_view()
-            except Exception as e:
-                QMessageBox.critical(self, "重命名失败", f"无法重命名: {str(e)}")
+            # 更新下拉框显示（不触发信号）
+            self.update_path_combo_display(target_path)
+        
+        # 更新向上按钮状态
+        self.update_up_button_state()
+    
+    def update_path_combo_display(self, path):
+        """更新路径下拉框显示 - 独立的显示更新逻辑"""
+        # 使用信号管理器安全地更新显示，避免递归触发
+        with self.signal_manager.block_signal(
+            self.path_combo.currentTextChanged,
+            self.handle_location_selection,
+            "combo_display_update"
+        ):
+            # 检查是否在预设列表中
+            path_found = False
+            for i in range(self.path_combo.count()):
+                if self.path_combo.itemData(i) == path:
+                    self.path_combo.setCurrentIndex(i)
+                    path_found = True
+                    break
+            
+            if not path_found:
+                # 如果路径不在预设列表中，直接设置文本
+                self.path_combo.setCurrentText(path)
 
-    def create_folder(self, parent_path):
-        """在指定路径创建新文件夹"""
-        if not os.path.exists(parent_path) or not os.path.isdir(parent_path):
-            QMessageBox.warning(self, "错误", "目标路径不存在或不是文件夹")
-            return
-            
-        folder_name, ok = QInputDialog.getText(
-            self, "新建文件夹", 
-            "请输入文件夹名称:",
-            text="新建文件夹"
-        )
-        
-        if ok and folder_name:
-            if not folder_name.strip():
-                QMessageBox.warning(self, "错误", "文件夹名称不能为空")
-                return
-                
-            new_folder_path = os.path.join(parent_path, folder_name)
-            
-            if os.path.exists(new_folder_path):
-                QMessageBox.warning(self, "错误", f"文件夹 '{folder_name}' 已经存在")
-                return
-                
-            try:
-                os.makedirs(new_folder_path)
-                self.refresh_view()
-            except Exception as e:
-                QMessageBox.critical(self, "创建失败", f"无法创建文件夹: {str(e)}")
-                
-    def create_file(self, parent_path):
-        """在指定路径创建新文件"""
-        if not os.path.exists(parent_path) or not os.path.isdir(parent_path):
-            QMessageBox.warning(self, "错误", "目标路径不存在或不是文件夹")
-            return
-            
-        file_name, ok = QInputDialog.getText(
-            self, "新建文件", 
-            "请输入文件名称:",
-            text="新建文件.txt"
-        )
-        
-        if ok and file_name:
-            if not file_name.strip():
-                QMessageBox.warning(self, "错误", "文件名称不能为空")
-                return
-                
-            new_file_path = os.path.join(parent_path, file_name)
-            
-            if os.path.exists(new_file_path):
-                QMessageBox.warning(self, "错误", f"文件 '{file_name}' 已经存在")
-                return
-                
-            try:
-                with open(new_file_path, 'w', encoding='utf-8') as f:
-                    f.write("")  # 创建空文件
-                self.refresh_view()
-            except Exception as e:
-                QMessageBox.critical(self, "创建失败", f"无法创建文件: {str(e)}")
-                
     def refresh_view(self):
         """刷新视图"""
         current_path = self.get_current_root_path()
@@ -1443,115 +1566,6 @@ class FileBrowser(QWidget):
         else:
             # 传递其他键盘事件给父类处理
             super().keyPressEvent(event)
-            
-    def copy_items(self, file_paths):
-        """复制文件到剪贴板"""
-        # 检查是否需要管理员权限
-        if not self.request_admin_if_needed(file_paths, "复制"):
-            return
-            
-        self.clipboard_items = file_paths.copy()
-        self.clipboard_operation = "copy"
-            
-    def cut_items(self, file_paths):
-        """剪切文件到剪贴板"""
-        # 检查是否需要管理员权限
-        if not self.request_admin_if_needed(file_paths, "剪切"):
-            return
-            
-        self.clipboard_items = file_paths.copy()
-        self.clipboard_operation = "cut"
-            
-    def paste_items(self, target_dir):
-        """粘贴剪贴板中的文件"""
-        if not self.clipboard_items:
-            QMessageBox.warning(self, "错误", "剪贴板为空")
-            return
-            
-        if not os.path.exists(target_dir) or not os.path.isdir(target_dir):
-            QMessageBox.warning(self, "错误", "目标路径不存在或不是文件夹")
-            return
-            
-        success_count = 0
-        error_count = 0
-        
-        for source_path in self.clipboard_items:
-            if not os.path.exists(source_path):
-                error_count += 1
-                continue
-                
-            file_name = os.path.basename(source_path)
-            target_path = os.path.join(target_dir, file_name)
-            
-            # 如果目标文件已存在，添加数字后缀
-            counter = 1
-            original_target = target_path
-            while os.path.exists(target_path):
-                name, ext = os.path.splitext(os.path.basename(original_target))
-                target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
-                counter += 1
-            
-            try:
-                if self.clipboard_operation == "copy":
-                    if os.path.isdir(source_path):
-                        shutil.copytree(source_path, target_path)
-                    else:
-                        shutil.copy2(source_path, target_path)
-                elif self.clipboard_operation == "cut":
-                    shutil.move(source_path, target_path)
-                success_count += 1
-            except Exception as e:
-                error_count += 1
-                QMessageBox.warning(self, "操作失败", f"无法处理 '{file_name}': {str(e)}")
-        
-        # 如果是剪切操作，清空剪贴板
-        if self.clipboard_operation == "cut":
-            self.clipboard_items = []
-            self.clipboard_operation = ""
-            
-        # 刷新视图
-        self.refresh_view()
-        
-        # 显示结果 - 只显示错误信息
-        if error_count > 0:
-            QMessageBox.warning(self, "部分失败", f"有 {error_count} 个项目操作失败")
-            
-    def open_in_explorer(self, dir_path):
-        """在Windows资源管理器中打开目录"""
-        if not os.path.exists(dir_path):
-            QMessageBox.warning(self, "错误", "目录不存在")
-            return
-            
-        try:
-            if sys.platform == "win32":
-                # Windows: 使用explorer打开目录
-                os.startfile(dir_path)
-            elif sys.platform == "darwin":  # macOS
-                subprocess.call(["open", dir_path])
-            else:  # Linux
-                subprocess.call(["xdg-open", dir_path])
-        except Exception as e:
-            QMessageBox.warning(self, "打开失败", f"无法打开目录: {str(e)}")
-
-    def request_admin_if_needed(self, file_paths, operation="操作"):
-        """如果需要管理员权限，则申请权限"""
-        from ..core.permission_manager import PermissionManager
-        return PermissionManager.request_admin_if_needed(file_paths, operation)
-        
-    def is_admin(self):
-        """检查当前是否有管理员权限"""
-        from ..core.permission_manager import PermissionManager
-        return PermissionManager.is_admin()
-
-    def is_archive_file(self, file_path):
-        """检查文件是否为支持的压缩包格式"""
-        if not os.path.isfile(file_path):
-            return False
-            
-        # 支持的压缩文件扩展名
-        archive_extensions = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz']
-        _, ext = os.path.splitext(file_path.lower())
-        return ext in archive_extensions 
 
     def navigate_archive_directory(self, directory):
         """在压缩包中导航到指定目录"""
@@ -1699,169 +1713,8 @@ class FileBrowser(QWidget):
             '.7z': '7-Zip压缩包',
         }
         
-        return type_map.get(ext, '文件') 
+        return type_map.get(ext, '文件')
 
-    def enter_archive_mode(self, archive_path, archive_file_list):
-        """进入压缩包查看模式"""
-        try:
-            self.archive_viewing_mode = True
-            self.archive_path = archive_path
-            self.archive_file_list = archive_file_list
-            self.archive_current_dir = ""
-            
-            # 创建压缩包内容模型
-            self.archive_model = QStandardItemModel()
-            
-            # 设置视图使用压缩包模型
-            if hasattr(self, 'tree_view') and self.tree_view:
-                self.tree_view.setModel(self.archive_model)
-            if hasattr(self, 'list_view') and self.list_view:
-                self.list_view.setModel(self.archive_model)
-            
-            # 显示压缩包根目录内容
-            self.display_archive_directory_content()
-            
-            # 设置列宽
-            if hasattr(self, 'setup_tree_columns'):
-                self.setup_tree_columns()
-            
-            # 更新向上按钮状态
-            if hasattr(self, 'update_up_button_state'):
-                self.update_up_button_state()
-            
-            # 更新路径显示
-            if hasattr(self, 'path_combo') and self.path_combo:
-                # 使用信号管理器安全地更新路径，避免触发handle_location_selection
-                with self.signal_manager.block_signal(
-                    self.path_combo.currentTextChanged, 
-                    self.handle_location_selection,
-                    "archive_path_update"
-                ):
-                    self.path_combo.lineEdit().setText(os.path.basename(archive_path))
-            
-        except Exception as e:
-            print(f"进入压缩包模式失败: {e}")
-            import traceback
-            print(f"详细错误: {traceback.format_exc()}")
-    
-    def exit_archive_mode(self):
-        """退出压缩包查看模式"""
-        self.archive_viewing_mode = False
-        self.archive_path = None
-        self.archive_file_list = []
-        self.archive_current_dir = ""
-        self.archive_model = None
-        
-        # 恢复文件系统模型
-        self.tree_view.setModel(self.file_model)
-        self.list_view.setModel(self.file_model)
-        
-        # 更新向上按钮状态
-        self.update_up_button_state() 
-
-    def open_archive_file(self, file_path):
-        """解压并打开压缩包中的文件"""
-        try:
-            # 创建临时目录
-            temp_dir = tempfile.mkdtemp(prefix="gudazip_")
-            
-            # 从压缩包中解压指定文件
-            from ..core.archive_manager import ArchiveManager
-            archive_manager = ArchiveManager()
-            
-            success = archive_manager.extract_archive(
-                self.archive_path, 
-                temp_dir, 
-                selected_files=[file_path]
-            )
-            
-            if success:
-                # 构建临时文件的完整路径
-                temp_file_path = os.path.join(temp_dir, file_path)
-                
-                # 使用系统默认程序打开文件
-                if os.path.exists(temp_file_path):
-                    if sys.platform == "win32":
-                        os.startfile(temp_file_path)
-                    elif sys.platform == "darwin":  # macOS
-                        subprocess.call(["open", temp_file_path])
-                    else:  # Linux
-                        subprocess.call(["xdg-open", temp_file_path])
-                else:
-                    QMessageBox.warning(self, "错误", "无法找到解压后的文件")
-            else:
-                QMessageBox.warning(self, "错误", "无法解压文件")
-                # 清理临时目录
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"打开文件失败：{str(e)}")
-        
-    def open_archive_folder(self, folder_path):
-        """打开压缩包中的文件夹"""
-        if not self.archive_viewing_mode:
-            QMessageBox.warning(self, "错误", "当前不是压缩包查看模式")
-            return
-            
-        if not os.path.exists(folder_path):
-            QMessageBox.warning(self, "错误", "文件夹不存在")
-            return
-            
-        try:
-            # 打开文件夹
-            if sys.platform == "win32":
-                os.startfile(folder_path)
-            elif sys.platform == "darwin":  # macOS
-                subprocess.call(["open", folder_path])
-            else:  # Linux
-                subprocess.call(["xdg-open", folder_path])
-        except Exception as e:
-            QMessageBox.critical(self, "打开文件夹失败", f"无法打开文件夹: {str(e)}") 
-
-    def extract_archive_file(self, file_path):
-        """解压压缩包中的单个文件到临时目录"""
-        try:
-            # 创建临时目录
-            temp_dir = tempfile.mkdtemp(prefix="gudazip_extract_")
-            
-            # 从压缩包中解压指定文件
-            from ..core.archive_manager import ArchiveManager
-            archive_manager = ArchiveManager()
-            
-            success = archive_manager.extract_archive(
-                self.archive_path, 
-                temp_dir, 
-                selected_files=[file_path]
-            )
-            
-            if success:
-                # 构建解压后文件的完整路径
-                extracted_file_path = os.path.join(temp_dir, file_path)
-                
-                if os.path.exists(extracted_file_path):
-                    # 在资源管理器中显示文件
-                    if sys.platform == "win32":
-                        # Windows: 选中文件并打开资源管理器
-                        subprocess.run(['explorer', '/select,', extracted_file_path])
-                    else:
-                        # 其他系统：打开包含文件夹
-                        parent_dir = os.path.dirname(extracted_file_path)
-                        if sys.platform == "darwin":  # macOS
-                            subprocess.call(["open", parent_dir])
-                        else:  # Linux
-                            subprocess.call(["xdg-open", parent_dir])
-                    
-                    QMessageBox.information(self, "解压成功", f"文件已解压到临时目录：\n{extracted_file_path}")
-                else:
-                    QMessageBox.warning(self, "错误", "无法找到解压后的文件")
-            else:
-                QMessageBox.warning(self, "错误", "解压文件失败")
-                # 清理临时目录
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"解压文件失败：{str(e)}")
-    
     def _exit_archive_mode(self):
         """退出压缩包查看模式"""
         # 查找主窗口并调用退出方法
@@ -1872,74 +1725,8 @@ class FileBrowser(QWidget):
                 return
             parent_widget = parent_widget.parent()
         # 如果找不到主窗口，直接退出压缩包模式
-        self.exit_archive_mode() 
+        self.exit_archive_mode()
 
-    def copy_archive_items(self, file_paths):
-        """复制压缩包内的文件到剪贴板"""
-        if not hasattr(self, 'archive_clipboard_items'):
-            self.archive_clipboard_items = []
-        self.archive_clipboard_items = file_paths.copy()
-        print(f"📋 已复制压缩包内文件: {file_paths}")
-    
-    def rename_archive_file(self, file_path, current_name):
-        """重命名压缩包内的文件或文件夹"""
-        new_name, ok = QInputDialog.getText(
-            self, "重命名", 
-            f"请输入新名称:", 
-            text=current_name
-        )
-        
-        if ok and new_name and new_name != current_name:
-            if not new_name.strip():
-                QMessageBox.warning(self, "错误", "名称不能为空")
-                return
-            
-            # 计算新的文件路径
-            if self.archive_current_dir:
-                new_file_path = f"{self.archive_current_dir}/{new_name}"
-            else:
-                new_file_path = new_name
-            
-            try:
-                # 使用ArchiveManager重命名文件
-                from ..core.archive_manager import ArchiveManager
-                archive_manager = ArchiveManager()
-                
-                success = archive_manager.rename_file_in_archive(
-                    self.archive_path, 
-                    file_path, 
-                    new_file_path
-                )
-                
-                if success:
-                    # 重新刷新压缩包内容显示
-                    self.refresh_archive_view()
-                    QMessageBox.information(self, "成功", f"文件已重命名为: {new_name}")
-                else:
-                    QMessageBox.warning(self, "重命名失败", "无法重命名该文件")
-                    
-            except Exception as e:
-                QMessageBox.critical(self, "重命名失败", f"重命名操作失败：{str(e)}")
-    
-    def refresh_archive_view(self):
-        """刷新压缩包内容显示"""
-        if not self.archive_viewing_mode or not self.archive_path:
-            return
-        
-        try:
-            # 重新读取压缩包文件列表
-            from ..core.archive_manager import ArchiveManager
-            archive_manager = ArchiveManager()
-            
-            file_list = archive_manager.list_archive_contents(self.archive_path)
-            if file_list:
-                self.archive_file_list = file_list
-                # 重新显示当前目录内容
-                self.display_archive_directory_content()
-            
-        except Exception as e:
-            print(f"刷新压缩包视图失败: {e}")
-    
     def create_archive_folder(self, parent_path=None):
         """在压缩包中创建新文件夹"""
         folder_name, ok = QInputDialog.getText(
@@ -1958,150 +1745,3 @@ class FileBrowser(QWidget):
                 self, "功能提示", 
                 "在压缩包中创建文件夹需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
             )
-    
-    def open_archive_folder_in_explorer(self):
-        """在资源管理器中打开当前压缩包所在文件夹"""
-        if not self.archive_path or not os.path.exists(self.archive_path):
-            QMessageBox.warning(self, "错误", "压缩包路径无效")
-            return
-        
-        # 获取压缩包所在的文件夹
-        archive_dir = os.path.dirname(self.archive_path)
-        
-        try:
-            if sys.platform == "win32":
-                # Windows: 直接打开文件夹（与普通模式保持一致）
-                os.startfile(archive_dir)
-            elif sys.platform == "darwin":  # macOS
-                subprocess.call(["open", archive_dir])
-            else:  # Linux
-                subprocess.call(["xdg-open", archive_dir])
-        except Exception as e:
-            QMessageBox.warning(self, "打开失败", f"无法打开文件夹: {str(e)}")
-    
-    def paste_to_archive(self):
-        """粘贴压缩包内复制的文件到当前位置"""
-        if not hasattr(self, 'archive_clipboard_items') or not self.archive_clipboard_items:
-            QMessageBox.warning(self, "错误", "没有可粘贴的压缩包内容")
-            return
-        
-        QMessageBox.information(
-            self, "功能提示", 
-            "在压缩包内移动/复制文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
-        )
-    
-    def paste_files_to_archive(self):
-        """将系统剪贴板中的文件粘贴到压缩包中"""
-        if not self.clipboard_items:
-            QMessageBox.warning(self, "错误", "没有可粘贴的文件")
-            return
-        
-        # 检查文件是否存在
-        existing_files = [f for f in self.clipboard_items if os.path.exists(f)]
-        if not existing_files:
-            QMessageBox.warning(self, "错误", "剪贴板中的文件不存在")
-            return
-        
-        reply = QMessageBox.question(
-            self, "确认粘贴", 
-            f"确定要将 {len(existing_files)} 个文件添加到压缩包中吗？\n注意：这需要重新创建压缩包。",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            QMessageBox.information(
-                self, "功能提示", 
-                "向压缩包中添加文件需要重新创建压缩包。\n此功能暂未实现，敬请期待。"
-            )
-
-    def delete_archive_file(self, file_path):
-        """删除压缩包内的文件"""
-        reply = QMessageBox.question(
-            self, "确认删除", 
-            f"确定要从压缩包中删除 '{os.path.basename(file_path)}' 吗？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            try:
-                # 使用ArchiveManager删除文件
-                from ..core.archive_manager import ArchiveManager
-                archive_manager = ArchiveManager()
-                
-                success = archive_manager.delete_file_from_archive(
-                    self.archive_path, 
-                    file_path
-                )
-                
-                if success:
-                    # 重新刷新压缩包内容显示
-                    self.refresh_archive_view()
-                    QMessageBox.information(self, "成功", f"文件已删除: {os.path.basename(file_path)}")
-                else:
-                    QMessageBox.warning(self, "删除失败", "无法删除该文件")
-                    
-            except Exception as e:
-                QMessageBox.critical(self, "删除失败", f"删除操作失败：{str(e)}")
-
-    def force_exit_archive_mode(self):
-        """强制退出压缩包模式 - 独立的退出逻辑"""
-        # 重置所有压缩包相关状态
-        self.archive_viewing_mode = False
-        self.archive_path = None
-        self.archive_file_list = []
-        self.archive_current_dir = ""
-        self.archive_model = None
-        
-        # 恢复文件系统模型
-        self.tree_view.setModel(self.file_model)
-        self.list_view.setModel(self.file_model)
-        
-        # 通知主窗口也退出压缩包模式
-        parent_widget = self.parent()
-        while parent_widget:
-            if hasattr(parent_widget, 'exit_archive_mode'):
-                parent_widget.exit_archive_mode()
-                break
-            parent_widget = parent_widget.parent()
-    
-    def force_navigate_to_path(self, target_path):
-        """强制导航到指定路径 - 独立的导航逻辑"""
-        if target_path == "ThisPC":
-            # 处理"此电脑"
-            self.file_model.setRootPath("")
-            self.tree_view.setRootIndex(self.file_model.index(""))
-            self.list_view.setRootIndex(self.file_model.index(""))
-        elif os.path.exists(target_path):
-            # 处理真实路径
-            self.file_model.setRootPath(target_path)
-            root_index = self.file_model.index(target_path)
-            self.tree_view.setRootIndex(root_index)
-            self.list_view.setRootIndex(root_index)
-            
-            # 更新下拉框显示（不触发信号）
-            self.update_path_combo_display(target_path)
-        
-        # 更新向上按钮状态
-        self.update_up_button_state()
-    
-    def update_path_combo_display(self, path):
-        """更新路径下拉框显示 - 独立的显示更新逻辑"""
-        # 使用信号管理器安全地更新显示，避免递归触发
-        with self.signal_manager.block_signal(
-            self.path_combo.currentTextChanged,
-            self.handle_location_selection,
-            "combo_display_update"
-        ):
-            # 检查是否在预设列表中
-            path_found = False
-            for i in range(self.path_combo.count()):
-                if self.path_combo.itemData(i) == path:
-                    self.path_combo.setCurrentIndex(i)
-                    path_found = True
-                    break
-            
-            if not path_found:
-                # 如果路径不在预设列表中，直接设置文本
-                self.path_combo.setCurrentText(path)

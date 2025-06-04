@@ -23,6 +23,7 @@ var/
 *.egg
 DevDoc.docx
 doc/
+docs/
 tools/
 backend/upload/
 
