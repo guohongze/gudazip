@@ -290,8 +290,15 @@ class CreateArchiveDialog(QDialog):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("创建压缩包")
-        self.setFixedSize(450, 240)  # 进一步缩小窗口
+        self.setMinimumSize(450, 240)  # 设置最小尺寸而不是固定尺寸
+        self.setMaximumSize(450, 400)  # 设置最大尺寸以避免过度拉伸
         self.setWindowIcon(qta.icon('fa5s.file-archive', color='#2e7d32'))
+        
+        # 记录基础高度
+        self.base_height = 240
+        self.custom_compression_height = 40  # 自定义压缩选项的额外高度
+        self.password_height = 35  # 密码输入的额外高度
+        self.custom_options_height = 60  # 自定义选项的额外高度
         
         # 主布局，紧凑设计
         layout = QVBoxLayout(self)
@@ -450,12 +457,34 @@ class CreateArchiveDialog(QDialog):
         
         # 创建压缩包按钮
         self.create_button = QPushButton("创建压缩包")
-        self.create_button.setMinimumSize(110, 32)
+        self.create_button.setMinimumSize(140, 42)  # 增大按钮尺寸
         self.create_button.setStyleSheet("""
             QPushButton {
-                font-size: 12px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #4CAF50, stop:1 #45a049);
+                border: 3px solid #2E7D32;
+                border-radius: 8px;
+                color: white;
+                font-size: 14px;
                 font-weight: bold;
-                padding: 6px 12px;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #66BB6A, stop:1 #4CAF50);
+                border: 3px solid #388E3C;
+                color: white;
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #2E7D32, stop:1 #1B5E20);
+                border: 3px solid #1B5E20;
+                color: white;
+            }
+            QPushButton:disabled {
+                background: #BDBDBD;
+                border: 3px solid #9E9E9E;
+                color: #757575;
             }
         """)
         self.create_button.clicked.connect(self.create_archive)
@@ -672,6 +701,9 @@ class CreateArchiveDialog(QDialog):
             self.password_widget.hide()
             self.password_button.setText("密码保护")
             self.password_edit.clear()
+        
+        # 动态调整窗口高度
+        QTimer.singleShot(0, self.adjust_dialog_height)
             
     def on_custom_options_button_toggled(self, checked):
         """自定义选项按钮切换"""
@@ -681,6 +713,9 @@ class CreateArchiveDialog(QDialog):
         else:
             self.custom_options_widget.hide()
             self.custom_options_button.setText("自定义选项")
+        
+        # 动态调整窗口高度
+        QTimer.singleShot(0, self.adjust_dialog_height)
         
     def on_background_toggled(self, checked):
         """后台压缩选项切换"""
@@ -692,6 +727,9 @@ class CreateArchiveDialog(QDialog):
             self.custom_compression_widget.show()
         else:
             self.custom_compression_widget.hide()
+        
+        # 动态调整窗口高度
+        QTimer.singleShot(0, self.adjust_dialog_height)
     
     def on_slider_value_changed(self, value):
         """滑块值改变"""
@@ -834,6 +872,9 @@ class CreateArchiveDialog(QDialog):
         self.progress_bar.setValue(0)
         self.status_label.setText("准备开始...")
         
+        # 动态调整窗口高度
+        QTimer.singleShot(0, self.adjust_dialog_height)
+        
         # 禁用界面
         self.create_button.setEnabled(False)
         
@@ -879,6 +920,9 @@ class CreateArchiveDialog(QDialog):
         self.progress_frame.setVisible(False)
         self.create_button.setEnabled(True)
         
+        # 动态调整窗口高度
+        QTimer.singleShot(0, self.adjust_dialog_height)
+        
         # 如果是后台模式，恢复窗口并显示通知
         if self.is_background_mode:
             self.restore_from_tray()
@@ -915,4 +959,27 @@ class CreateArchiveDialog(QDialog):
         if self.tray_icon:
             self.tray_icon.hide()
             
-        event.accept() 
+        event.accept()
+
+    def adjust_dialog_height(self):
+        """动态调整对话框高度"""
+        current_height = self.base_height
+        
+        # 如果显示自定义压缩选项，增加高度
+        if self.custom_compression_widget.isVisible():
+            current_height += self.custom_compression_height
+        
+        # 如果显示密码输入，增加高度
+        if self.password_widget.isVisible():
+            current_height += self.password_height
+        
+        # 如果显示自定义选项，增加高度
+        if self.custom_options_widget.isVisible():
+            current_height += self.custom_options_height
+        
+        # 如果显示进度条，增加高度
+        if hasattr(self, 'progress_frame') and self.progress_frame.isVisible():
+            current_height += 50
+        
+        # 设置新的高度
+        self.resize(450, current_height) 
