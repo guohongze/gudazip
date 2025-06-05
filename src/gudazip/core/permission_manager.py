@@ -8,6 +8,7 @@ import os
 import sys
 import ctypes
 from typing import List, Union
+import importlib.util
 
 
 class PermissionManager:
@@ -66,7 +67,41 @@ class PermissionManager:
         if needs_admin and not PermissionManager.is_admin():
             # 动态导入以避免循环导入
             try:
-                from main import request_admin_permission
+                # 尝试多种导入路径
+                try:
+                    # 首先尝试从根目录导入
+                    import sys
+                    import os
+                    main_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'main.py')
+                    if os.path.exists(main_path):
+                        spec = importlib.util.spec_from_file_location("main", main_path)
+                        main_module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(main_module)
+                        request_admin_permission = main_module.request_admin_permission
+                    else:
+                        # 备用：尝试直接导入
+                        from main import request_admin_permission
+                except ImportError:
+                    # 再次备用：尝试从上级目录导入
+                    import importlib.util
+                    main_py_paths = [
+                        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'main.py'),
+                        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'main.py'),
+                        'main.py'
+                    ]
+                    
+                    request_admin_permission = None
+                    for path in main_py_paths:
+                        if os.path.exists(path):
+                            spec = importlib.util.spec_from_file_location("main", path)
+                            main_module = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(main_module)
+                            request_admin_permission = main_module.request_admin_permission
+                            break
+                    
+                    if request_admin_permission is None:
+                        raise ImportError("无法找到main模块")
+                
                 reason = f"{operation}系统文件"
                 if request_admin_permission(reason):
                     sys.exit(0)  # 重启为管理员模式

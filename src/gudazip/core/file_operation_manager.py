@@ -232,180 +232,192 @@ class FileOperationManager(QObject):
     
     def create_folder(self, parent_path: str, folder_name: str = None) -> FileOperationResult:
         """
-        在指定路径创建新文件夹
+        在指定目录下创建新文件夹
         
         Args:
             parent_path: 父目录路径
-            folder_name: 文件夹名称（如果为None则弹出输入框）
+            folder_name: 文件夹名称（可选，如果不提供会弹出对话框）
             
         Returns:
             FileOperationResult: 操作结果
         """
+        if not os.path.exists(parent_path):
+            return FileOperationResult(False, "父目录不存在")
+        
+        if not os.path.isdir(parent_path):
+            return FileOperationResult(False, "指定路径不是目录")
+        
+        # 检查权限 - 如果需要管理员权限则提示用户
         try:
-            if not os.path.exists(parent_path):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_NOT_FOUND,
-                    ErrorSeverity.ERROR,
-                    f"父目录不存在：{parent_path}",
-                    context={"path": parent_path, "operation": "create_folder"}
-                )
-                return FileOperationResult(False, "父目录不存在")
-            
-            if not os.path.isdir(parent_path):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_OPERATION,
-                    ErrorSeverity.ERROR,
-                    f"指定路径不是目录：{parent_path}",
-                    context={"path": parent_path, "operation": "create_folder"}
-                )
-                return FileOperationResult(False, "指定路径不是目录")
-            
+            from .permission_manager import PermissionManager
+            if not PermissionManager.request_admin_if_needed([parent_path], "创建文件夹"):
+                return FileOperationResult(False, "需要管理员权限才能在此位置创建文件夹")
+        except ImportError:
+            logger.warning("PermissionManager not available, proceeding without permission check")
+        except Exception as e:
+            logger.error(f"Permission check failed: {e}")
+        
+        try:
+            # 如果没有提供文件夹名称，弹出对话框询问
             if folder_name is None:
-                folder_name, ok = QInputDialog.getText(
-                    self.parent_widget,
-                    "新建文件夹",
-                    "请输入文件夹名称:",
-                    text="新建文件夹"
-                )
-                
-                if not ok or not folder_name.strip():
-                    return FileOperationResult(False, "用户取消创建文件夹")
-                
-                folder_name = folder_name.strip()
-            
-            # 检查文件夹名称是否包含非法字符
-            illegal_chars = '<>:"/\\|?*'
-            for char in illegal_chars:
-                if char in folder_name:
-                    self.error_manager.handle_error(
-                        ErrorCategory.USER_INPUT,
-                        ErrorSeverity.WARNING,
-                        f"文件夹名包含非法字符：{char}",
-                        details=f"文件夹名不能包含以下字符：{illegal_chars}",
-                        context={"folder_name": folder_name, "illegal_char": char}
+                if self.parent_widget:
+                    text, ok = QInputDialog.getText(
+                        self.parent_widget, "创建文件夹", 
+                        "请输入文件夹名称:",
+                        text="新建文件夹"
                     )
-                    return FileOperationResult(False, f"文件夹名包含非法字符：{char}")
+                    if not ok or not text:
+                        return FileOperationResult(False, "用户取消创建文件夹操作")
+                    folder_name = text.strip()
+                else:
+                    return FileOperationResult(False, "未提供文件夹名称且无法显示对话框")
             
+            # 验证文件夹名称
+            if not folder_name:
+                return FileOperationResult(False, "文件夹名称不能为空")
+            
+            # 检查名称是否包含非法字符
+            illegal_chars = ['<', '>', ':', '"', '|', '?', '*']
+            if any(char in folder_name for char in illegal_chars):
+                return FileOperationResult(False, f"文件夹名称不能包含以下字符: {' '.join(illegal_chars)}")
+            
+            # 构建完整路径
             folder_path = os.path.join(parent_path, folder_name)
             
-            # 检查是否已存在
+            # 检查文件夹是否已存在
             if os.path.exists(folder_path):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_OPERATION,
-                    ErrorSeverity.WARNING,
-                    f"文件夹已存在：{folder_name}",
-                    context={"folder_path": folder_path, "operation": "create_folder"}
-                )
-                return FileOperationResult(False, f"文件夹已存在：{folder_name}")
+                return FileOperationResult(False, f"文件夹 '{folder_name}' 已存在")
             
             # 创建文件夹
-            os.makedirs(folder_path)
+            os.makedirs(folder_path, exist_ok=False)
             
-            return FileOperationResult(True, f"成功创建文件夹：{folder_name}", [folder_path])
+            result = FileOperationResult(
+                True, 
+                f"成功创建文件夹: {folder_name}",
+                [folder_path]
+            )
+            
+            self.operation_finished.emit("create_folder", result)
+            return result
             
         except PermissionError as e:
+            error_msg = f"权限不足，无法在此位置创建文件夹"
             self.error_manager.handle_exception(
                 e,
-                context={"path": parent_path, "folder_name": folder_name, "operation": "create_folder"},
+                context={"parent_path": parent_path, "folder_name": folder_name, "operation": "create_folder"},
                 category=ErrorCategory.FILE_PERMISSION
             )
-            return FileOperationResult(False, "权限不足，无法创建文件夹")
+            return FileOperationResult(False, error_msg)
+        except OSError as e:
+            error_msg = f"创建文件夹失败: {str(e)}"
+            self.error_manager.handle_exception(
+                e,
+                context={"parent_path": parent_path, "folder_name": folder_name, "operation": "create_folder"},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, error_msg)
         except Exception as e:
             self.error_manager.handle_exception(
                 e,
-                context={"path": parent_path, "folder_name": folder_name, "operation": "create_folder"},
+                context={"parent_path": parent_path, "folder_name": folder_name, "operation": "create_folder"},
                 category=ErrorCategory.FILE_OPERATION
             )
-            return FileOperationResult(False, f"创建文件夹失败：{str(e)}")
+            return FileOperationResult(False, f"创建文件夹操作失败：{str(e)}")
     
     def create_file(self, parent_path: str, file_name: str = None) -> FileOperationResult:
         """
-        在指定路径创建新文件
+        在指定目录下创建新文件
         
         Args:
             parent_path: 父目录路径
-            file_name: 文件名称（如果为None则弹出输入框）
+            file_name: 文件名称（可选，如果不提供会弹出对话框）
             
         Returns:
             FileOperationResult: 操作结果
         """
+        if not os.path.exists(parent_path):
+            return FileOperationResult(False, "父目录不存在")
+        
+        if not os.path.isdir(parent_path):
+            return FileOperationResult(False, "指定路径不是目录")
+        
+        # 检查权限 - 如果需要管理员权限则提示用户
         try:
-            if not os.path.exists(parent_path):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_NOT_FOUND,
-                    ErrorSeverity.ERROR,
-                    f"父目录不存在：{parent_path}",
-                    context={"path": parent_path, "operation": "create_file"}
-                )
-                return FileOperationResult(False, "父目录不存在")
-            
-            if not os.path.isdir(parent_path):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_OPERATION,
-                    ErrorSeverity.ERROR,
-                    f"指定路径不是目录：{parent_path}",
-                    context={"path": parent_path, "operation": "create_file"}
-                )
-                return FileOperationResult(False, "指定路径不是目录")
-            
+            from .permission_manager import PermissionManager
+            if not PermissionManager.request_admin_if_needed([parent_path], "创建文件"):
+                return FileOperationResult(False, "需要管理员权限才能在此位置创建文件")
+        except ImportError:
+            logger.warning("PermissionManager not available, proceeding without permission check")
+        except Exception as e:
+            logger.error(f"Permission check failed: {e}")
+        
+        try:
+            # 如果没有提供文件名称，弹出对话框询问
             if file_name is None:
-                file_name, ok = QInputDialog.getText(
-                    self.parent_widget,
-                    "新建文件",
-                    "请输入文件名称:",
-                    text="新建文件.txt"
-                )
-                
-                if not ok or not file_name.strip():
-                    return FileOperationResult(False, "用户取消创建文件")
-                
-                file_name = file_name.strip()
-            
-            # 检查文件名称是否包含非法字符
-            illegal_chars = '<>:"/\\|?*'
-            for char in illegal_chars:
-                if char in file_name:
-                    self.error_manager.handle_error(
-                        ErrorCategory.USER_INPUT,
-                        ErrorSeverity.WARNING,
-                        f"文件名包含非法字符：{char}",
-                        details=f"文件名不能包含以下字符：{illegal_chars}",
-                        context={"file_name": file_name, "illegal_char": char}
+                if self.parent_widget:
+                    text, ok = QInputDialog.getText(
+                        self.parent_widget, "创建文件", 
+                        "请输入文件名称:",
+                        text="新建文件.txt"
                     )
-                    return FileOperationResult(False, f"文件名包含非法字符：{char}")
+                    if not ok or not text:
+                        return FileOperationResult(False, "用户取消创建文件操作")
+                    file_name = text.strip()
+                else:
+                    return FileOperationResult(False, "未提供文件名称且无法显示对话框")
             
+            # 验证文件名称
+            if not file_name:
+                return FileOperationResult(False, "文件名称不能为空")
+            
+            # 检查名称是否包含非法字符
+            illegal_chars = ['<', '>', ':', '"', '|', '?', '*']
+            if any(char in file_name for char in illegal_chars):
+                return FileOperationResult(False, f"文件名称不能包含以下字符: {' '.join(illegal_chars)}")
+            
+            # 构建完整路径
             file_path = os.path.join(parent_path, file_name)
             
-            # 检查是否已存在
+            # 检查文件是否已存在
             if os.path.exists(file_path):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_OPERATION,
-                    ErrorSeverity.WARNING,
-                    f"文件已存在：{file_name}",
-                    context={"file_path": file_path, "operation": "create_file"}
-                )
-                return FileOperationResult(False, f"文件已存在：{file_name}")
+                return FileOperationResult(False, f"文件 '{file_name}' 已存在")
             
             # 创建文件
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write("")  # 创建空文件
             
-            return FileOperationResult(True, f"成功创建文件：{file_name}", [file_path])
+            result = FileOperationResult(
+                True, 
+                f"成功创建文件: {file_name}",
+                [file_path]
+            )
+            
+            self.operation_finished.emit("create_file", result)
+            return result
             
         except PermissionError as e:
+            error_msg = f"权限不足，无法在此位置创建文件"
             self.error_manager.handle_exception(
                 e,
-                context={"path": parent_path, "file_name": file_name, "operation": "create_file"},
+                context={"parent_path": parent_path, "file_name": file_name, "operation": "create_file"},
                 category=ErrorCategory.FILE_PERMISSION
             )
-            return FileOperationResult(False, "权限不足，无法创建文件")
+            return FileOperationResult(False, error_msg)
+        except OSError as e:
+            error_msg = f"创建文件失败: {str(e)}"
+            self.error_manager.handle_exception(
+                e,
+                context={"parent_path": parent_path, "file_name": file_name, "operation": "create_file"},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, error_msg)
         except Exception as e:
             self.error_manager.handle_exception(
                 e,
-                context={"path": parent_path, "file_name": file_name, "operation": "create_file"},
+                context={"parent_path": parent_path, "file_name": file_name, "operation": "create_file"},
                 category=ErrorCategory.FILE_OPERATION
             )
-            return FileOperationResult(False, f"创建文件失败：{str(e)}")
+            return FileOperationResult(False, f"创建文件操作失败：{str(e)}")
     
     def delete_files(self, file_paths: List[str], confirm: bool = True) -> FileOperationResult:
         """
@@ -420,6 +432,19 @@ class FileOperationManager(QObject):
         """
         if not file_paths:
             return FileOperationResult(False, "没有选择要删除的文件")
+        
+        # 检查权限 - 如果需要管理员权限则提示用户
+        try:
+            from .permission_manager import PermissionManager
+            if not PermissionManager.request_admin_if_needed(file_paths, "删除"):
+                return FileOperationResult(False, "需要管理员权限才能删除这些文件")
+        except ImportError:
+            # 权限管理器不可用时的警告
+            logger.warning("PermissionManager not available, proceeding without permission check")
+        except Exception as e:
+            # 权限请求过程中的错误
+            logger.error(f"Permission check failed: {e}")
+            # 继续执行，但记录错误
         
         # 检查异步操作条件
         if self.enable_async and len(file_paths) >= self.async_delete_threshold:
@@ -516,85 +541,94 @@ class FileOperationManager(QObject):
         重命名文件或文件夹
         
         Args:
-            file_path: 原文件路径
-            new_name: 新名称（如果为None则弹出输入框）
+            file_path: 要重命名的文件路径
+            new_name: 新的文件名（可选，如果不提供会弹出对话框）
             
         Returns:
             FileOperationResult: 操作结果
         """
+        if not os.path.exists(file_path):
+            return FileOperationResult(False, "要重命名的文件不存在")
+        
+        # 检查权限 - 如果需要管理员权限则提示用户
         try:
-            if not os.path.exists(file_path):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_NOT_FOUND,
-                    ErrorSeverity.ERROR,
-                    f"文件不存在：{file_path}",
-                    context={"path": file_path, "operation": "rename"}
-                )
-                return FileOperationResult(False, "文件不存在")
-            
+            from .permission_manager import PermissionManager
+            if not PermissionManager.request_admin_if_needed([file_path], "重命名"):
+                return FileOperationResult(False, "需要管理员权限才能重命名此文件")
+        except ImportError:
+            logger.warning("PermissionManager not available, proceeding without permission check")
+        except Exception as e:
+            logger.error(f"Permission check failed: {e}")
+        
+        try:
             current_name = os.path.basename(file_path)
+            parent_dir = os.path.dirname(file_path)
             
+            # 如果没有提供新名称，弹出对话框询问
             if new_name is None:
-                new_name, ok = QInputDialog.getText(
-                    self.parent_widget,
-                    "重命名",
-                    "请输入新名称:",
-                    text=current_name
-                )
-                
-                if not ok or not new_name.strip():
-                    return FileOperationResult(False, "用户取消重命名操作")
-                
-                new_name = new_name.strip()
+                if self.parent_widget:
+                    text, ok = QInputDialog.getText(
+                        self.parent_widget, "重命名", 
+                        f"请输入新的名称:", 
+                        text=current_name
+                    )
+                    if not ok or not text:
+                        return FileOperationResult(False, "用户取消重命名操作")
+                    new_name = text.strip()
+                else:
+                    return FileOperationResult(False, "未提供新名称且无法显示对话框")
             
-            if new_name == current_name:
-                return FileOperationResult(False, "新名称与原名称相同")
+            # 验证新名称
+            if not new_name or new_name == current_name:
+                return FileOperationResult(False, "新名称不能为空或与原名称相同")
             
             # 检查新名称是否包含非法字符
-            illegal_chars = '<>:"/\\|?*'
-            for char in illegal_chars:
-                if char in new_name:
-                    self.error_manager.handle_error(
-                        ErrorCategory.USER_INPUT,
-                        ErrorSeverity.WARNING,
-                        f"文件名包含非法字符：{char}",
-                        details=f"文件名不能包含以下字符：{illegal_chars}",
-                        context={"new_name": new_name, "illegal_char": char}
-                    )
-                    return FileOperationResult(False, f"文件名包含非法字符：{char}")
+            illegal_chars = ['<', '>', ':', '"', '|', '?', '*']
+            if any(char in new_name for char in illegal_chars):
+                return FileOperationResult(False, f"文件名不能包含以下字符: {' '.join(illegal_chars)}")
             
-            parent_dir = os.path.dirname(file_path)
+            # 构建新的完整路径
             new_path = os.path.join(parent_dir, new_name)
             
-            # 检查新路径是否已存在
+            # 检查目标是否已存在
             if os.path.exists(new_path):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_OPERATION,
-                    ErrorSeverity.WARNING,
-                    f"目标名称已存在：{new_name}",
-                    context={"new_path": new_path, "operation": "rename"}
-                )
-                return FileOperationResult(False, f"目标名称已存在：{new_name}")
+                return FileOperationResult(False, f"名称 '{new_name}' 已存在")
             
             # 执行重命名
             os.rename(file_path, new_path)
             
-            return FileOperationResult(True, f"成功重命名为：{new_name}", [new_path])
+            result = FileOperationResult(
+                True, 
+                f"已将 '{current_name}' 重命名为 '{new_name}'",
+                [new_path]
+            )
+            
+            self.operation_finished.emit("rename", result)
+            return result
             
         except PermissionError as e:
+            error_msg = f"权限不足，无法重命名 '{current_name}'"
             self.error_manager.handle_exception(
                 e,
                 context={"path": file_path, "new_name": new_name, "operation": "rename"},
                 category=ErrorCategory.FILE_PERMISSION
             )
-            return FileOperationResult(False, "权限不足，无法重命名")
+            return FileOperationResult(False, error_msg)
+        except OSError as e:
+            error_msg = f"重命名失败: {str(e)}"
+            self.error_manager.handle_exception(
+                e,
+                context={"path": file_path, "new_name": new_name, "operation": "rename"},
+                category=ErrorCategory.FILE_OPERATION
+            )
+            return FileOperationResult(False, error_msg)
         except Exception as e:
             self.error_manager.handle_exception(
                 e,
                 context={"path": file_path, "new_name": new_name, "operation": "rename"},
                 category=ErrorCategory.FILE_OPERATION
             )
-            return FileOperationResult(False, f"重命名失败：{str(e)}")
+            return FileOperationResult(False, f"重命名操作失败：{str(e)}")
     
     # ========== 剪贴板操作 ==========
     
@@ -731,22 +765,21 @@ class FileOperationManager(QObject):
                 return FileOperationResult(False, "剪贴板为空")
             
             if not os.path.exists(target_dir):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_NOT_FOUND,
-                    ErrorSeverity.ERROR,
-                    f"目标目录不存在：{target_dir}",
-                    context={"target_dir": target_dir, "operation": "paste"}
-                )
                 return FileOperationResult(False, "目标目录不存在")
             
             if not os.path.isdir(target_dir):
-                self.error_manager.handle_error(
-                    ErrorCategory.FILE_OPERATION,
-                    ErrorSeverity.ERROR,
-                    f"目标路径不是目录：{target_dir}",
-                    context={"target_dir": target_dir, "operation": "paste"}
-                )
                 return FileOperationResult(False, "目标路径不是目录")
+            
+            # 检查权限 - 如果需要管理员权限则提示用户
+            try:
+                from .permission_manager import PermissionManager
+                operation_name = "移动" if self.clipboard_operation == "cut" else "复制"
+                if not PermissionManager.request_admin_if_needed([target_dir], f"{operation_name}文件"):
+                    return FileOperationResult(False, f"需要管理员权限才能在此位置{operation_name}文件")
+            except ImportError:
+                logger.warning("PermissionManager not available, proceeding without permission check")
+            except Exception as e:
+                logger.error(f"Permission check failed: {e}")
             
             # 检查异步操作条件
             if self.enable_async and len(self.clipboard_items) >= self.async_paste_threshold:
@@ -850,7 +883,10 @@ class FileOperationManager(QObject):
             else:
                 operation_name = "移动" if self.clipboard_operation == "cut" else "复制"
                 message = f"成功{operation_name} {len(successful_files)} 个文件"
-                return FileOperationResult(True, message, successful_files)
+                result = FileOperationResult(True, message, successful_files)
+                
+                self.operation_finished.emit("paste", result)
+                return result
                 
         except Exception as e:
             self.error_manager.handle_exception(
