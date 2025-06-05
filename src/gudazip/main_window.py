@@ -390,36 +390,95 @@ class MainWindow(QMainWindow):
             
     def extract_archive(self):
         """解压压缩包"""
-        # 获取当前选择的压缩包路径
+        # 获取当前选中的文件路径
+        selected_paths = self.file_browser.get_selected_paths()
         current_path = self.file_browser.get_current_path()
         
-        # 如果没有选择文件，或选择的不是压缩包，使用文件对话框选择
-        if not current_path or not self.archive_manager.is_archive_file(current_path):
-            current_path, _ = QFileDialog.getOpenFileName(
+        # 检查是否处于压缩包查看模式
+        if self.file_browser.archive_viewing_mode:
+            # 情况4：在压缩包打开状态
+            archive_path = self.file_browser.current_archive_path
+            
+            if selected_paths:
+                # 有选中文件，解压选中的文件
+                selected_files = []
+                for path in selected_paths:
+                    # 获取文件在压缩包中的相对路径
+                    if hasattr(self.file_browser, 'get_archive_relative_path'):
+                        relative_path = self.file_browser.get_archive_relative_path(path)
+                        if relative_path:
+                            selected_files.append(relative_path)
+                    else:
+                        # 如果没有相对路径方法，直接使用路径
+                        selected_files.append(path)
+                
+                if selected_files:
+                    try:
+                        # 创建并显示解压对话框（部分解压）
+                        dialog = ExtractArchiveDialog(
+                            self.archive_manager, 
+                            archive_path, 
+                            selected_files, 
+                            self
+                        )
+                        
+                        if dialog.exec() == QDialog.Accepted:
+                            self.path_label.setText(f"解压完成：{len(selected_files)} 个文件")
+                    except Exception as e:
+                        QMessageBox.critical(self, "错误", f"无法打开解压对话框：{str(e)}")
+                else:
+                    QMessageBox.warning(self, "警告", "无法获取选中文件的路径信息")
+            else:
+                # 没有选中文件，解压整个压缩包
+                try:
+                    dialog = ExtractArchiveDialog(self.archive_manager, archive_path, None, self)
+                    
+                    if dialog.exec() == QDialog.Accepted:
+                        self.path_label.setText("解压完成：整个压缩包")
+                except Exception as e:
+                    QMessageBox.critical(self, "错误", f"无法打开解压对话框：{str(e)}")
+            return
+        
+        # 情况1和2：文件系统模式
+        archive_file = None
+        
+        # 检查选中的文件中是否有压缩包
+        if selected_paths:
+            for path in selected_paths:
+                if self.archive_manager.is_archive_file(path):
+                    archive_file = path
+                    break
+        
+        # 如果没有选中压缩包，检查当前选中的单个文件
+        if not archive_file and current_path and self.archive_manager.is_archive_file(current_path):
+            archive_file = current_path
+            
+        # 情况2：没有选中任何压缩包文件
+        if not archive_file:
+            # 使用文件对话框让用户选择压缩包
+            archive_file, _ = QFileDialog.getOpenFileName(
                 self, "选择要解压的压缩包", "",
                 "压缩包文件 (*.zip *.rar *.7z *.tar *.gz *.bz2);;所有文件 (*.*)"
             )
             
-        if not current_path:
+        if not archive_file:
             return
             
         # 检查文件是否存在
-        if not os.path.exists(current_path):
-            QMessageBox.warning(self, "警告", f"文件不存在：{current_path}")
+        if not os.path.exists(archive_file):
+            QMessageBox.warning(self, "警告", f"文件不存在：{archive_file}")
             return
             
         # 检查是否为支持的压缩包格式
-        if not self.archive_manager.is_archive_file(current_path):
-            QMessageBox.warning(self, "警告", f"不支持的文件格式：{current_path}")
+        if not self.archive_manager.is_archive_file(archive_file):
+            QMessageBox.warning(self, "警告", f"不支持的文件格式：{archive_file}")
             return
             
         try:
-            # 创建并显示解压对话框
-            dialog = ExtractArchiveDialog(self.archive_manager, current_path, self)
+            # 情况1：选中了压缩包文件，直接解压整个压缩包
+            dialog = ExtractArchiveDialog(self.archive_manager, archive_file, None, self)
             
-            # 显示对话框
             if dialog.exec() == QDialog.Accepted:
-                # 解压完成，更新状态
                 self.path_label.setText("解压完成")
                     
         except Exception as e:

@@ -7,12 +7,47 @@
 import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QPushButton, QListWidget, QListWidgetItem, QGroupBox,
-    QCheckBox, QProgressBar, QFileDialog, QMessageBox,
-    QTreeWidget, QTreeWidgetItem, QRadioButton, QButtonGroup
+    QPushButton, QGroupBox, QProgressBar, QFileDialog, QMessageBox
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
+
+
+class ProgressBarWidget(QProgressBar):
+    """美化的进度条组件"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_style()
+        
+    def setup_style(self):
+        """设置进度条样式"""
+        self.setStyleSheet("""
+        QProgressBar {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            text-align: center;
+            background-color: #f5f5f5;
+            font-weight: bold;
+            font-size: 12px;
+            color: #333333;
+            height: 24px;
+        }
+        
+        QProgressBar::chunk {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                      stop:0 #2196F3, stop:0.5 #42A5F5, stop:1 #64B5F6);
+            border-radius: 6px;
+        }
+        
+        QProgressBar[value="0"] {
+            color: #666666;
+        }
+        
+        QProgressBar[value="100"] {
+            color: #ffffff;
+        }
+        """)
 
 
 class ExtractArchiveWorker(QThread):
@@ -28,12 +63,21 @@ class ExtractArchiveWorker(QThread):
         self.extract_to = extract_to
         self.password = password
         self.selected_files = selected_files
+        self.stop_requested = False  # 停止请求标志
         
     def run(self):
         """执行解压任务"""
         try:
+            if self.stop_requested:
+                return
+                
             self.status.emit("正在解压压缩包...")
             self.progress.emit(0)
+            
+            # 检查是否被请求停止
+            if self.stop_requested:
+                self.finished.emit(False, "解压被用户取消")
+                return
             
             # 解压压缩包
             success = self.archive_manager.extract_archive(
@@ -42,6 +86,11 @@ class ExtractArchiveWorker(QThread):
                 self.password,
                 self.selected_files
             )
+            
+            # 再次检查是否被请求停止
+            if self.stop_requested:
+                self.finished.emit(False, "解压被用户取消")
+                return
             
             if success:
                 self.progress.emit(100)
@@ -62,16 +111,18 @@ class ExtractArchiveWorker(QThread):
                 self.finished.emit(False, "解压失败")
                 
         except Exception as e:
-            self.finished.emit(False, f"解压时发生错误：{str(e)}")
+            if not self.stop_requested:
+                self.finished.emit(False, f"解压时发生错误：{str(e)}")
 
 
 class ExtractArchiveDialog(QDialog):
     """解压压缩包对话框"""
     
-    def __init__(self, archive_manager, archive_path, parent=None):
+    def __init__(self, archive_manager, archive_path, selected_files=None, parent=None):
         super().__init__(parent)
         self.archive_manager = archive_manager
         self.archive_path = archive_path
+        self.selected_files = selected_files  # 要解压的特定文件（None表示解压全部）
         self.archive_info = None
         self.worker = None
         
@@ -84,12 +135,12 @@ class ExtractArchiveDialog(QDialog):
             return
             
         self.init_ui()
-        self.load_archive_contents()
         
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("解压压缩包")
-        self.setMinimumSize(700, 600)
+        self.setMinimumSize(500, 300)
+        self.resize(500, 300)
         
         # 主布局
         layout = QVBoxLayout(self)
@@ -104,7 +155,12 @@ class ExtractArchiveDialog(QDialog):
         
         if self.archive_info:
             info_layout.addWidget(QLabel(f"格式: {self.archive_info['format']}"))
-            info_layout.addWidget(QLabel(f"文件数量: {self.archive_info['file_count']}"))
+            
+            # 显示解压信息
+            if self.selected_files:
+                info_layout.addWidget(QLabel(f"解压文件数: {len(self.selected_files)} 个选中文件"))
+            else:
+                info_layout.addWidget(QLabel(f"解压文件数: {self.archive_info['file_count']} 个文件（全部）"))
             
             # 格式化文件大小
             total_size = self.archive_info['total_size']
@@ -142,67 +198,28 @@ class ExtractArchiveDialog(QDialog):
         
         options_layout.addLayout(target_layout)
         
-        # 解压方式选择
-        extract_mode_layout = QVBoxLayout()
-        self.mode_group = QButtonGroup()
-        
-        self.extract_all_radio = QRadioButton("解压所有文件")
-        self.extract_all_radio.setChecked(True)
-        self.extract_all_radio.toggled.connect(self.on_mode_changed)
-        self.mode_group.addButton(self.extract_all_radio, 0)
-        extract_mode_layout.addWidget(self.extract_all_radio)
-        
-        self.extract_selected_radio = QRadioButton("仅解压选中的文件")
-        self.extract_selected_radio.toggled.connect(self.on_mode_changed)
-        self.mode_group.addButton(self.extract_selected_radio, 1)
-        extract_mode_layout.addWidget(self.extract_selected_radio)
-        
-        options_layout.addLayout(extract_mode_layout)
-        
-        # 密码输入
-        password_layout = QHBoxLayout()
-        password_layout.addWidget(QLabel("密码:"))
-        self.password_edit = QLineEdit()
-        self.password_edit.setEchoMode(QLineEdit.Password)
-        self.password_edit.setPlaceholderText("如果压缩包有密码保护，请输入密码")
-        password_layout.addWidget(self.password_edit)
-        options_layout.addLayout(password_layout)
+        # 密码输入（仅在需要时显示）
+        if self.archive_info and self.archive_info.get('has_password'):
+            password_layout = QHBoxLayout()
+            password_layout.addWidget(QLabel("密码:"))
+            self.password_edit = QLineEdit()
+            self.password_edit.setEchoMode(QLineEdit.Password)
+            self.password_edit.setPlaceholderText("请输入压缩包密码")
+            password_layout.addWidget(self.password_edit)
+            options_layout.addLayout(password_layout)
+        else:
+            self.password_edit = None
         
         layout.addWidget(options_group)
         
-        # 文件列表组
-        files_group = QGroupBox("压缩包内容")
-        files_layout = QVBoxLayout(files_group)
-        
-        # 文件树
-        self.files_tree = QTreeWidget()
-        self.files_tree.setHeaderLabels(["名称", "大小", "修改时间"])
-        self.files_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
-        self.files_tree.itemChanged.connect(self.on_item_changed)
-        files_layout.addWidget(self.files_tree)
-        
-        # 文件选择按钮
-        file_buttons_layout = QHBoxLayout()
-        
-        self.select_all_button = QPushButton("全选")
-        self.select_all_button.clicked.connect(self.select_all_files)
-        file_buttons_layout.addWidget(self.select_all_button)
-        
-        self.deselect_all_button = QPushButton("全不选")
-        self.deselect_all_button.clicked.connect(self.deselect_all_files)
-        file_buttons_layout.addWidget(self.deselect_all_button)
-        
-        file_buttons_layout.addStretch()
-        files_layout.addLayout(file_buttons_layout)
-        
-        layout.addWidget(files_group)
-        
         # 进度条和状态
-        self.progress_bar = QProgressBar()
+        self.progress_bar = ProgressBarWidget()
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
         
         self.status_label = QLabel("准备解压")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("font-size: 10px; color: #666666;")
         layout.addWidget(self.status_label)
         
         # 按钮
@@ -211,16 +228,29 @@ class ExtractArchiveDialog(QDialog):
         
         self.extract_button = QPushButton("开始解压")
         self.extract_button.clicked.connect(self.extract_archive)
+        self.extract_button.setStyleSheet("""
+        QPushButton {
+            background-color: #1976d2;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: #1565c0;
+        }
+        QPushButton:pressed {
+            background-color: #0d47a1;
+        }
+        QPushButton:disabled {
+            background-color: #cccccc;
+            color: #666666;
+        }
+        """)
         buttons_layout.addWidget(self.extract_button)
         
-        self.cancel_button = QPushButton("取消")
-        self.cancel_button.clicked.connect(self.reject)
-        buttons_layout.addWidget(self.cancel_button)
-        
         layout.addLayout(buttons_layout)
-        
-        # 初始状态设置
-        self.on_mode_changed()
         
     def format_size(self, size_bytes):
         """格式化文件大小"""
@@ -234,56 +264,6 @@ class ExtractArchiveDialog(QDialog):
             i += 1
             
         return f"{size_bytes:.1f} {size_names[i]}"
-        
-    def load_archive_contents(self):
-        """加载压缩包内容"""
-        if not self.archive_info or not self.archive_info.get('files'):
-            return
-            
-        # 构建文件树
-        self.files_tree.clear()
-        root_items = {}  # 路径到项目的映射
-        
-        for file_info in self.archive_info['files']:
-            file_path = file_info['path']
-            parts = file_path.split('/')
-            
-            current_parent = self.files_tree.invisibleRootItem()
-            current_path = ""
-            
-            # 构建目录结构
-            for i, part in enumerate(parts):
-                if i < len(parts) - 1:  # 这是一个目录
-                    current_path = current_path + part + "/" if current_path else part + "/"
-                    
-                    if current_path not in root_items:
-                        dir_item = QTreeWidgetItem(current_parent)
-                        dir_item.setText(0, f"📁 {part}")
-                        dir_item.setText(1, "")
-                        dir_item.setText(2, "")
-                        dir_item.setCheckState(0, Qt.Checked)
-                        dir_item.setData(0, Qt.UserRole, current_path)
-                        dir_item.setData(0, Qt.UserRole + 1, "folder")
-                        
-                        root_items[current_path] = dir_item
-                        current_parent = dir_item
-                    else:
-                        current_parent = root_items[current_path]
-                else:  # 这是文件
-                    file_item = QTreeWidgetItem(current_parent)
-                    file_item.setText(0, f"📄 {part}")
-                    file_item.setText(1, self.format_size(file_info.get('size', 0)))
-                    file_item.setText(2, file_info.get('modified_time', ''))
-                    file_item.setCheckState(0, Qt.Checked)
-                    file_item.setData(0, Qt.UserRole, file_path)
-                    file_item.setData(0, Qt.UserRole + 1, "file")
-                    
-        # 展开所有项目
-        self.files_tree.expandAll()
-        
-        # 调整列宽
-        for i in range(3):
-            self.files_tree.resizeColumnToContents(i)
             
     def browse_target_path(self):
         """浏览目标路径"""
@@ -292,106 +272,6 @@ class ExtractArchiveDialog(QDialog):
         )
         if dir_path:
             self.target_edit.setText(dir_path)
-            
-    def on_mode_changed(self):
-        """解压模式改变"""
-        extract_selected = self.extract_selected_radio.isChecked()
-        
-        # 启用/禁用文件选择相关控件
-        self.files_tree.setEnabled(extract_selected)
-        self.select_all_button.setEnabled(extract_selected)
-        self.deselect_all_button.setEnabled(extract_selected)
-        
-        if not extract_selected:
-            # 如果是解压全部，选中所有项目
-            self.select_all_files()
-            
-    def select_all_files(self):
-        """全选文件"""
-        self._set_all_check_state(Qt.Checked)
-        
-    def deselect_all_files(self):
-        """全不选文件"""
-        self._set_all_check_state(Qt.Unchecked)
-        
-    def _set_all_check_state(self, state):
-        """设置所有项目的选中状态"""
-        def set_item_state(item):
-            item.setCheckState(0, state)
-            for i in range(item.childCount()):
-                set_item_state(item.child(i))
-                
-        root = self.files_tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            set_item_state(root.child(i))
-            
-    def on_item_changed(self, item, column):
-        """项目状态改变"""
-        if column == 0:  # 只处理第一列的复选框
-            # 更新子项目状态
-            state = item.checkState(0)
-            self._update_children_state(item, state)
-            
-            # 更新父项目状态
-            self._update_parent_state(item)
-            
-    def _update_children_state(self, parent, state):
-        """更新子项目状态"""
-        for i in range(parent.childCount()):
-            child = parent.child(i)
-            child.setCheckState(0, state)
-            self._update_children_state(child, state)
-            
-    def _update_parent_state(self, item):
-        """更新父项目状态"""
-        parent = item.parent()
-        if parent is None:
-            return
-            
-        # 检查所有兄弟项目的状态
-        checked_count = 0
-        total_count = parent.childCount()
-        
-        for i in range(total_count):
-            if parent.child(i).checkState(0) == Qt.Checked:
-                checked_count += 1
-                
-        # 设置父项目状态
-        if checked_count == 0:
-            parent.setCheckState(0, Qt.Unchecked)
-        elif checked_count == total_count:
-            parent.setCheckState(0, Qt.Checked)
-        else:
-            parent.setCheckState(0, Qt.PartiallyChecked)
-            
-        # 递归更新上级父项目
-        self._update_parent_state(parent)
-        
-    def get_selected_files(self):
-        """获取选中的文件列表"""
-        selected_files = []
-        
-        def collect_files(item):
-            if item.checkState(0) == Qt.Checked:
-                item_type = item.data(0, Qt.UserRole + 1)
-                item_path = item.data(0, Qt.UserRole)
-                
-                if item_type == "file":
-                    selected_files.append(item_path)
-                elif item_type == "folder":
-                    # 收集文件夹下的所有文件
-                    for i in range(item.childCount()):
-                        collect_files(item.child(i))
-            else:
-                # 即使父项目未选中，也要检查子项目
-                for i in range(item.childCount()):
-                    collect_files(item.child(i))
-                    
-        root = self.files_tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            collect_files(root.child(i))
-            
-        return selected_files
         
     def extract_archive(self):
         """开始解压"""
@@ -401,15 +281,9 @@ class ExtractArchiveDialog(QDialog):
             return
             
         # 获取密码
-        password = self.password_edit.text() if self.password_edit.text() else None
-        
-        # 获取选中的文件
-        selected_files = None
-        if self.extract_selected_radio.isChecked():
-            selected_files = self.get_selected_files()
-            if not selected_files:
-                QMessageBox.warning(self, "警告", "请至少选择一个文件进行解压")
-                return
+        password = None
+        if self.password_edit:
+            password = self.password_edit.text() if self.password_edit.text() else None
                 
         # 确保目标目录存在
         try:
@@ -420,7 +294,7 @@ class ExtractArchiveDialog(QDialog):
             
         # 禁用界面
         self.extract_button.setEnabled(False)
-        self.cancel_button.setText("停止")
+        self.extract_button.setText("解压中...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
@@ -430,7 +304,7 @@ class ExtractArchiveDialog(QDialog):
             self.archive_path,
             extract_to,
             password,
-            selected_files
+            self.selected_files
         )
         
         # 连接信号
@@ -445,7 +319,7 @@ class ExtractArchiveDialog(QDialog):
         """解压完成"""
         self.progress_bar.setVisible(False)
         self.extract_button.setEnabled(True)
-        self.cancel_button.setText("取消")
+        self.extract_button.setText("开始解压")
         
         if success:
             QMessageBox.information(self, "成功", message)
@@ -467,10 +341,28 @@ class ExtractArchiveDialog(QDialog):
                 QMessageBox.No
             )
             if reply == QMessageBox.Yes:
-                self.worker.terminate()
-                self.worker.wait()
+                # 设置标志通知工作线程停止
+                if hasattr(self.worker, 'stop_requested'):
+                    self.worker.stop_requested = True
+                
+                # 等待线程正常结束
+                self.worker.wait(3000)  # 等待3秒
+                
+                # 如果线程仍在运行，强制终止
+                if self.worker.isRunning():
+                    self.worker.terminate()
+                    self.worker.wait(1000)
+                
+                # 清理工作线程
+                self.worker.deleteLater()
+                self.worker = None
             else:
                 event.ignore()
                 return
+        
+        # 如果有未运行的工作线程，也要清理
+        if self.worker:
+            self.worker.deleteLater()
+            self.worker = None
                 
         event.accept() 

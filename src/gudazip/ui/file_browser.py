@@ -450,14 +450,37 @@ class FileBrowser(QWidget):
         
     def get_selected_paths(self):
         """获取所有选中的路径"""
-        selected_indexes = self.file_view.get_selected_indexes()
-        paths = []
-        for index in selected_indexes:
-            if index.column() == 0:  # 只处理第一列（文件名列）
-                path = self.file_model.filePath(index)
-                if path not in paths:
-                    paths.append(path)
-        return sorted(paths)  # 按字母顺序排序
+        if self.archive_viewing_mode:
+            # 压缩包模式：获取选中的文件在压缩包中的路径
+            selected_indexes = self.file_view.get_selected_indexes()
+            paths = []
+            for index in selected_indexes:
+                if index.column() == 0:  # 只处理第一列（文件名列）
+                    # 在压缩包模式下，从UserRole+1获取文件路径
+                    item = self.archive_model.itemFromIndex(index)
+                    if item:
+                        file_path = item.data(Qt.UserRole + 1)
+                        if file_path and file_path not in paths:
+                            paths.append(file_path)
+            return sorted(paths)
+        else:
+            # 文件系统模式：获取文件系统路径
+            selected_indexes = self.file_view.get_selected_indexes()
+            paths = []
+            for index in selected_indexes:
+                if index.column() == 0:  # 只处理第一列（文件名列）
+                    path = self.file_model.filePath(index)
+                    if path not in paths:
+                        paths.append(path)
+            return sorted(paths)  # 按字母顺序排序
+        
+    def get_archive_relative_path(self, display_path):
+        """获取文件在压缩包中的相对路径"""
+        if not self.archive_viewing_mode:
+            return None
+        
+        # 如果是显示路径，直接返回（因为在压缩包模式下，get_selected_paths已经返回了正确的路径）
+        return display_path
         
     def set_current_path(self, path):
         """设置当前选中的路径"""
