@@ -129,7 +129,8 @@ class ZipHandler:
             
     def create_archive(self, file_path: str, files: List[str],
                       compression_level: int = 6,
-                      password: Optional[str] = None) -> bool:
+                      password: Optional[str] = None,
+                      progress_callback=None) -> bool:
         """创建ZIP压缩包"""
         try:
             # 验证输入
@@ -149,11 +150,36 @@ class ZipHandler:
             paths_to_check = files + [os.path.dirname(file_path)]
             if not PermissionManager.request_admin_if_needed(paths_to_check, "创建压缩包"):
                 return False
+            
+            # 计算总文件大小和文件数量以跟踪进度
+            total_size = 0
+            total_files = []
+            
+            if progress_callback:
+                progress_callback(0, "正在计算文件大小...")
+            
+            for file_or_dir in files:
+                if os.path.isfile(file_or_dir):
+                    total_size += os.path.getsize(file_or_dir)
+                    total_files.append(file_or_dir)
+                elif os.path.isdir(file_or_dir):
+                    for root, dirs, file_list in os.walk(file_or_dir):
+                        for file_name in file_list:
+                            file_full_path = os.path.join(root, file_name)
+                            if os.path.exists(file_full_path):
+                                total_size += os.path.getsize(file_full_path)
+                                total_files.append(file_full_path)
+            
+            if progress_callback:
+                progress_callback(5, f"开始压缩 {len(total_files)} 个文件...")
                 
             # 设置压缩级别
             compression = zipfile.ZIP_DEFLATED
             if compression_level == 0:
                 compression = zipfile.ZIP_STORED
+            
+            processed_size = 0
+            processed_files = 0
                 
             with zipfile.ZipFile(file_path, 'w', compression) as zf:
                 for file_or_dir in files:
@@ -161,6 +187,15 @@ class ZipHandler:
                         # 添加文件
                         arcname = os.path.basename(file_or_dir)
                         zf.write(file_or_dir, arcname)
+                        
+                        # 更新进度
+                        if os.path.exists(file_or_dir):
+                            processed_size += os.path.getsize(file_or_dir)
+                            processed_files += 1
+                            if progress_callback and total_size > 0:
+                                progress = int(5 + (processed_size / total_size) * 85)  # 5-90%的范围
+                                progress_callback(progress, f"正在压缩: {os.path.basename(file_or_dir)}")
+                        
                     elif os.path.isdir(file_or_dir):
                         # 添加目录及其内容
                         for root, dirs, file_list in os.walk(file_or_dir):
@@ -171,10 +206,24 @@ class ZipHandler:
                                                          os.path.dirname(file_or_dir))
                                 zf.write(file_full_path, arcname)
                                 
+                                # 更新进度
+                                if os.path.exists(file_full_path):
+                                    processed_size += os.path.getsize(file_full_path)
+                                    processed_files += 1
+                                    if progress_callback and total_size > 0:
+                                        progress = int(5 + (processed_size / total_size) * 85)  # 5-90%的范围
+                                        progress_callback(progress, f"正在压缩: {os.path.basename(file_name)}")
+            
+            if progress_callback:
+                progress_callback(95, "正在完成压缩...")
+                                
             # 如果需要密码保护，需要使用第三方库如pyminizip
             if password:
                 # TODO: 实现密码保护功能
                 print("ZIP密码保护功能需要pyminizip库支持")
+            
+            if progress_callback:
+                progress_callback(100, "压缩完成")
                 
             return True
             

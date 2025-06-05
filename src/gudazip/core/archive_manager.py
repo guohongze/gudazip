@@ -107,7 +107,8 @@ class ArchiveManager:
         
     def create_archive(self, file_path: str, files: List[str], 
                       compression_level: int = 6,
-                      password: Optional[str] = None) -> bool:
+                      password: Optional[str] = None,
+                      progress_callback=None) -> bool:
         """创建压缩包"""
         try:
             # 验证输入参数
@@ -130,7 +131,7 @@ class ArchiveManager:
             handler = self.handlers.get(ext)
             
             if handler and hasattr(handler, 'create_archive'):
-                return handler.create_archive(file_path, files, compression_level, password)
+                return handler.create_archive(file_path, files, compression_level, password, progress_callback)
             else:
                 raise ValueError(f"不支持创建 {ext} 格式的压缩包")
                 

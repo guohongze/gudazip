@@ -138,23 +138,28 @@ class CreateArchiveWorker(QThread):
     def run(self):
         """执行压缩任务"""
         try:
-            self.status.emit("正在创建压缩包...")
-            self.progress.emit(10)
+            self.status.emit("正在准备压缩...")
+            self.progress.emit(0)
+            
+            # 定义进度回调函数
+            def progress_callback(progress, status_text):
+                self.progress.emit(progress)
+                self.status.emit(status_text)
             
             # 创建压缩包
             success = self.archive_manager.create_archive(
                 self.archive_path, 
                 self.files,
                 self.compression_level,
-                self.password
+                self.password,
+                progress_callback
             )
             
             if success:
-                self.progress.emit(80)
-                
                 # 如果需要创建自解压文件
                 if self.create_sfx:
                     self.status.emit("正在创建自解压文件...")
+                    self.progress.emit(95)
                     # TODO: 实现自解压文件创建
                     # 这里可以调用archive_manager的相关方法
                     pass
@@ -162,7 +167,7 @@ class CreateArchiveWorker(QThread):
                 # 如果需要删除源文件
                 if self.delete_source:
                     self.status.emit("正在删除源文件...")
-                    self.progress.emit(90)
+                    self.progress.emit(98)
                     try:
                         import shutil
                         for file_path in self.files:
