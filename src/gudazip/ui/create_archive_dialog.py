@@ -799,23 +799,71 @@ class CreateArchiveDialog(QDialog):
             self.fast_compression_radio.setChecked(True)
             self.custom_compression_widget.hide()
         
+    def is_drive_root(self, path):
+        """检查路径是否为盘符根目录"""
+        try:
+            # 规范化路径
+            normalized_path = os.path.normpath(path)
+            
+            # 在Windows系统中检查是否为盘符根目录
+            if os.name == 'nt':  # Windows
+                # 检查是否为 C:\, D:\ 或 C:, D: 等格式
+                import re
+                # 匹配 C:\, D:\, C:, D: 等模式
+                drive_pattern = r'^[A-Za-z]:[\\/]?$'
+                if re.match(drive_pattern, normalized_path):
+                    return True
+                
+                # 对于没有斜杠的情况（如 "C:"），使用os.path.abspath检查
+                abs_path = os.path.abspath(path)
+                drive_pattern_abs = r'^[A-Za-z]:\\?$'
+                return bool(re.match(drive_pattern_abs, abs_path))
+            else:
+                # 在Unix系统中检查是否为根目录
+                return normalized_path == '/' or normalized_path == '\\'
+        except Exception:
+            return False
+    
+    def has_drive_root_selection(self):
+        """检查选中的文件中是否包含盘符根目录"""
+        for file_path in self.selected_files:
+            if self.is_drive_root(file_path):
+                return True
+        return False
+    
     def update_ui_state(self):
         """更新界面状态"""
         has_files = len(self.selected_files) > 0
         has_path = bool(self.path_edit.text().strip())
+        has_drive_root = self.has_drive_root_selection()
         
-        self.create_button.setEnabled(has_files and has_path)
-        
-        # 更新状态
-        if has_files:
+        # 如果选中了盘符根目录，禁用创建按钮
+        if has_drive_root:
+            self.create_button.setEnabled(False)
+            self.info_label.setText("⚠️ 不支持压缩整个盘符，请选择具体的文件或文件夹")
+            self.info_label.setStyleSheet("color: #F44336; font-size: 10px; font-weight: bold;")
+        elif has_files and has_path:
+            self.create_button.setEnabled(True)
             self.info_label.setText(f"已选择 {len(self.selected_files)} 个项目")
+            self.info_label.setStyleSheet("color: #666666; font-size: 10px;")
+        elif has_files:
+            self.create_button.setEnabled(False)
+            self.info_label.setText(f"已选择 {len(self.selected_files)} 个项目，请设置保存路径")
+            self.info_label.setStyleSheet("color: #FF9800; font-size: 10px;")
         else:
+            self.create_button.setEnabled(False)
             self.info_label.setText("请在主界面选择要压缩的文件或文件夹")
+            self.info_label.setStyleSheet("color: #666666; font-size: 10px;")
             
     def create_archive(self):
         """创建压缩包"""
         if not self.selected_files:
             QMessageBox.warning(self, "警告", "请先在主界面选择要压缩的文件或文件夹")
+            return
+        
+        # 检查是否选中了盘符根目录
+        if self.has_drive_root_selection():
+            QMessageBox.warning(self, "警告", "不支持压缩整个盘符，请选择具体的文件或文件夹")
             return
             
         archive_path = self.path_edit.text().strip()
