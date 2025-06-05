@@ -69,7 +69,8 @@ class ZipHandler:
         
     def extract_archive(self, file_path: str, extract_to: str,
                        password: Optional[str] = None,
-                       selected_files: Optional[List[str]] = None) -> bool:
+                       selected_files: Optional[List[str]] = None,
+                       progress_callback=None) -> bool:
         """解压ZIP文件"""
         try:
             # 验证输入参数
@@ -90,28 +91,66 @@ class ZipHandler:
                 if password:
                     zf.setpassword(password.encode('utf-8'))
                 
-                # 解压指定文件或全部文件
+                # 获取要解压的文件列表和总大小
                 if selected_files:
+                    files_to_extract = []
+                    total_size = 0
+                    # 验证选中的文件是否存在于压缩包中
                     for file_name in selected_files:
                         try:
-                            # 安全检查：防止路径遍历攻击
-                            if self._is_safe_path(file_name, extract_to):
-                                zf.extract(file_name, extract_to)
-                            else:
-                                print(f"跳过不安全的路径: {file_name}")
+                            info = zf.getinfo(file_name)
+                            files_to_extract.append(info)
+                            total_size += info.file_size
                         except KeyError:
-                            print(f"文件不存在: {file_name}")
-                            continue
-                        except Exception as e:
-                            print(f"解压文件 {file_name} 失败: {e}")
+                            print(f"文件不存在于压缩包中: {file_name}")
                             continue
                 else:
-                    # 安全解压所有文件
-                    for member in zf.infolist():
-                        if self._is_safe_path(member.filename, extract_to):
-                            zf.extract(member, extract_to)
+                    files_to_extract = [info for info in zf.infolist() if not info.filename.endswith('/')]
+                    total_size = sum(info.file_size for info in files_to_extract)
+                
+                if progress_callback:
+                    progress_callback(0, f"准备解压 {len(files_to_extract)} 个文件...")
+                
+                # 解压文件并跟踪进度
+                extracted_size = 0
+                extracted_count = 0
+                
+                for info in files_to_extract:
+                    try:
+                        # 安全检查：防止路径遍历攻击
+                        if self._is_safe_path(info.filename, extract_to):
+                            # 显示当前正在解压的文件
+                            if progress_callback:
+                                file_name = os.path.basename(info.filename)
+                                progress_callback(
+                                    int(5 + (extracted_size / total_size) * 85) if total_size > 0 else 5,
+                                    f"正在解压: {file_name}"
+                                )
+                            
+                            # 解压文件
+                            zf.extract(info, extract_to)
+                            
+                            # 更新进度
+                            extracted_size += info.file_size
+                            extracted_count += 1
+                            
+                            # 更新进度条
+                            if progress_callback and total_size > 0:
+                                progress = int(5 + (extracted_size / total_size) * 85)  # 5-90%的范围
+                                progress_callback(progress, f"已解压: {extracted_count}/{len(files_to_extract)} 个文件")
                         else:
-                            print(f"跳过不安全的路径: {member.filename}")
+                            print(f"跳过不安全的路径: {info.filename}")
+                            extracted_count += 1
+                            
+                    except Exception as e:
+                        print(f"解压文件 {info.filename} 失败: {e}")
+                        extracted_count += 1
+                        continue
+                
+                if progress_callback:
+                    progress_callback(95, "正在完成解压...")
+                    time.sleep(0.1)  # 短暂延迟让用户看到95%状态
+                    progress_callback(100, "解压完成")
                     
             return True
             

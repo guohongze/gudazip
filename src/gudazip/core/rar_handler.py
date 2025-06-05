@@ -105,7 +105,8 @@ class RarHandler:
         
     def extract_archive(self, file_path: str, extract_to: str,
                        password: Optional[str] = None,
-                       selected_files: Optional[List[str]] = None) -> bool:
+                       selected_files: Optional[List[str]] = None,
+                       progress_callback=None) -> bool:
         """解压RAR文件"""
         if not RARFILE_AVAILABLE:
             raise Exception("rarfile库未安装，无法处理RAR文件")
@@ -114,6 +115,9 @@ class RarHandler:
             # 确保解压目录存在
             os.makedirs(extract_to, exist_ok=True)
             
+            if progress_callback:
+                progress_callback(0, "正在准备解压RAR文件...")
+            
             with rarfile.RarFile(file_path, 'r') as rf:
                 # 设置密码（如果需要）
                 if password:
@@ -121,14 +125,29 @@ class RarHandler:
                 
                 # 解压指定文件或全部文件
                 if selected_files:
-                    for file_name in selected_files:
+                    if progress_callback:
+                        progress_callback(10, f"正在解压 {len(selected_files)} 个选中文件...")
+                    
+                    for i, file_name in enumerate(selected_files):
                         try:
                             rf.extract(file_name, extract_to)
+                            if progress_callback:
+                                progress = int(10 + (i + 1) / len(selected_files) * 80)
+                                progress_callback(progress, f"正在解压: {os.path.basename(file_name)}")
                         except KeyError:
                             print(f"文件不存在: {file_name}")
                             continue
                 else:
+                    if progress_callback:
+                        progress_callback(10, "正在解压所有文件...")
+                    
                     rf.extractall(extract_to)
+                    
+                    if progress_callback:
+                        progress_callback(90, "解压完成")
+            
+            if progress_callback:
+                progress_callback(100, "解压完成")
                     
             return True
             

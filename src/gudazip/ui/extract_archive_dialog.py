@@ -79,12 +79,19 @@ class ExtractArchiveWorker(QThread):
                 self.finished.emit(False, "解压被用户取消")
                 return
             
+            # 定义进度回调函数
+            def progress_callback(progress, status_text):
+                if not self.stop_requested:
+                    self.progress.emit(progress)
+                    self.status.emit(status_text)
+            
             # 解压压缩包
             success = self.archive_manager.extract_archive(
                 self.archive_path,
                 self.extract_to,
                 self.password,
-                self.selected_files
+                self.selected_files,
+                progress_callback
             )
             
             # 再次检查是否被请求停止

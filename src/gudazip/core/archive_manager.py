@@ -76,7 +76,8 @@ class ArchiveManager:
         
     def extract_archive(self, file_path: str, extract_to: str, 
                        password: Optional[str] = None,
-                       selected_files: Optional[List[str]] = None) -> bool:
+                       selected_files: Optional[List[str]] = None,
+                       progress_callback=None) -> bool:
         """解压压缩包"""
         try:
             if not self.is_archive_file(file_path):
@@ -94,7 +95,13 @@ class ArchiveManager:
             handler = self.handlers.get(ext)
             
             if handler:
-                return handler.extract_archive(file_path, extract_to, password, selected_files)
+                # 检查handler是否支持progress_callback
+                import inspect
+                sig = inspect.signature(handler.extract_archive)
+                if 'progress_callback' in sig.parameters:
+                    return handler.extract_archive(file_path, extract_to, password, selected_files, progress_callback)
+                else:
+                    return handler.extract_archive(file_path, extract_to, password, selected_files)
             return False
             
         except Exception as e:
