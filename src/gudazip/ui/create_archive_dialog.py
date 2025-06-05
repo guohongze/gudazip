@@ -10,12 +10,13 @@ from PySide6.QtWidgets import (
     QPushButton, QListWidget, QListWidgetItem, QGroupBox,
     QComboBox, QCheckBox, QProgressBar, QTextEdit,
     QFileDialog, QMessageBox, QSplitter, QRadioButton, QButtonGroup,
-    QFrame, QScrollArea, QSystemTrayIcon, QMenu, QWidget
+    QFrame, QScrollArea, QSystemTrayIcon, QMenu, QWidget, QSlider
 )
 from PySide6.QtCore import Qt, QThread, Signal, QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QFont, QPalette, QColor, QIcon, QAction
 import qtawesome as qta
 from ..core.permission_manager import PermissionManager
+from ..core.config_manager import get_config_manager
 
 
 class CollapsibleWidget(QWidget):
@@ -202,8 +203,12 @@ class CreateArchiveDialog(QDialog):
         self.is_background_mode = False
         self.tray_icon = None
         
+        # 获取配置管理器
+        self.config_manager = get_config_manager(parent)
+        
         self.init_ui()
         self.setup_system_tray()
+        self.load_compression_settings()
         
     def setup_system_tray(self):
         """设置系统托盘"""
@@ -320,10 +325,18 @@ class CreateArchiveDialog(QDialog):
         self.compression_group.addButton(self.fast_compression_radio, 3)
         compression_layout.addWidget(self.fast_compression_radio)
         
-        # 极致压缩
-        self.max_compression_radio = QRadioButton("极致压缩")
-        self.compression_group.addButton(self.max_compression_radio, 9)
-        compression_layout.addWidget(self.max_compression_radio)
+        # 较小体积（原极致压缩）
+        self.small_compression_radio = QRadioButton("较小体积")
+        self.compression_group.addButton(self.small_compression_radio, 6)
+        compression_layout.addWidget(self.small_compression_radio)
+        
+        # 自定比率
+        self.custom_compression_radio = QRadioButton("自定比率")
+        self.compression_group.addButton(self.custom_compression_radio, -1)  # 使用-1标识自定义
+        self.custom_compression_radio.toggled.connect(self.on_custom_compression_toggled)
+        compression_layout.addWidget(self.custom_compression_radio)
+        
+        compression_layout.addStretch()
         
         # 格式选择
         compression_layout.addWidget(QLabel("格式:"))
@@ -332,8 +345,33 @@ class CreateArchiveDialog(QDialog):
         self.format_combo.currentTextChanged.connect(self.on_format_changed)
         compression_layout.addWidget(self.format_combo)
         
-        compression_layout.addStretch()
         layout.addLayout(compression_layout)
+        
+        # 自定义压缩比率滑块（初始隐藏）
+        self.custom_compression_widget = QWidget()
+        custom_layout = QHBoxLayout(self.custom_compression_widget)
+        custom_layout.setContentsMargins(20, 0, 0, 0)
+        
+        custom_layout.addWidget(QLabel("压缩级别:"))
+        
+        self.compression_slider = QSlider(Qt.Horizontal)
+        self.compression_slider.setMinimum(0)
+        self.compression_slider.setMaximum(9)
+        self.compression_slider.setValue(5)
+        self.compression_slider.setTickPosition(QSlider.TicksBelow)
+        self.compression_slider.setTickInterval(1)
+        self.compression_slider.valueChanged.connect(self.on_slider_value_changed)
+        custom_layout.addWidget(self.compression_slider)
+        
+        self.compression_value_label = QLabel("5")
+        self.compression_value_label.setMinimumWidth(20)
+        custom_layout.addWidget(self.compression_value_label)
+        
+        custom_layout.addWidget(QLabel("(0=不压缩, 9=最大压缩)"))
+        custom_layout.addStretch()
+        
+        self.custom_compression_widget.hide()  # 默认隐藏
+        layout.addWidget(self.custom_compression_widget)
         
         # 功能按钮行
         button_layout = QHBoxLayout()
@@ -460,20 +498,45 @@ class CreateArchiveDialog(QDialog):
         self.compression_group.addButton(self.fast_compression_radio, 3)  # 压缩率3
         compression_layout.addWidget(self.fast_compression_radio)
         
-        # 极致压缩
-        self.max_compression_radio = QRadioButton("极致压缩")
-        self.compression_group.addButton(self.max_compression_radio, 9)  # 压缩率9
-        compression_layout.addWidget(self.max_compression_radio)
+        # 较小体积（原极致压缩）
+        self.small_compression_radio = QRadioButton("较小体积")
+        self.compression_group.addButton(self.small_compression_radio, 6)  # 压缩率6
+        compression_layout.addWidget(self.small_compression_radio)
         
-        # 格式选择
-        compression_layout.addWidget(QLabel("格式:"))
-        self.format_combo = QComboBox()
-        self.format_combo.addItems(["zip"])
-        self.format_combo.currentTextChanged.connect(self.on_format_changed)
-        compression_layout.addWidget(self.format_combo)
+        # 自定比率
+        self.custom_compression_radio = QRadioButton("自定比率")
+        self.compression_group.addButton(self.custom_compression_radio, -1)  # 使用-1标识自定义
+        self.custom_compression_radio.toggled.connect(self.on_custom_compression_toggled)
+        compression_layout.addWidget(self.custom_compression_radio)
         
         compression_layout.addStretch()
         layout.addLayout(compression_layout)
+        
+        # 自定义压缩比率滑块（初始隐藏）
+        self.custom_compression_widget = QWidget()
+        custom_layout = QHBoxLayout(self.custom_compression_widget)
+        custom_layout.setContentsMargins(20, 0, 0, 0)
+        
+        custom_layout.addWidget(QLabel("压缩级别:"))
+        
+        self.compression_slider = QSlider(Qt.Horizontal)
+        self.compression_slider.setMinimum(0)
+        self.compression_slider.setMaximum(9)
+        self.compression_slider.setValue(5)
+        self.compression_slider.setTickPosition(QSlider.TicksBelow)
+        self.compression_slider.setTickInterval(1)
+        self.compression_slider.valueChanged.connect(self.on_slider_value_changed)
+        custom_layout.addWidget(self.compression_slider)
+        
+        self.compression_value_label = QLabel("5")
+        self.compression_value_label.setMinimumWidth(20)
+        custom_layout.addWidget(self.compression_value_label)
+        
+        custom_layout.addWidget(QLabel("(0=不压缩, 9=最大压缩)"))
+        custom_layout.addStretch()
+        
+        self.custom_compression_widget.hide()  # 默认隐藏
+        layout.addWidget(self.custom_compression_widget)
         
         # 按钮行：密码保护和自定义选项
         button_layout = QHBoxLayout()
@@ -623,6 +686,81 @@ class CreateArchiveDialog(QDialog):
         """后台压缩选项切换"""
         self.is_background_mode = checked
         
+    def on_custom_compression_toggled(self, checked):
+        """自定义压缩选项切换"""
+        if checked:
+            self.custom_compression_widget.show()
+        else:
+            self.custom_compression_widget.hide()
+    
+    def on_slider_value_changed(self, value):
+        """滑块值改变"""
+        self.compression_value_label.setText(str(value))
+        
+    def get_compression_level(self):
+        """获取当前选择的压缩级别"""
+        checked_id = self.compression_group.checkedId()
+        if checked_id == -1:  # 自定义比率
+            return self.compression_slider.value()
+        else:
+            return checked_id
+    
+    def get_compression_mode(self):
+        """获取当前选择的压缩模式"""
+        checked_id = self.compression_group.checkedId()
+        if checked_id == 3:
+            return "fast"
+        elif checked_id == 6:
+            return "small"
+        elif checked_id == -1:
+            return "custom"
+        else:
+            return "fast"  # 默认值
+    
+    def save_compression_settings(self):
+        """保存压缩设置到配置文件"""
+        try:
+            mode = self.get_compression_mode()
+            custom_level = self.compression_slider.value()
+            
+            self.config_manager.set_config("compression.default_mode", mode)
+            self.config_manager.set_config("compression.custom_level", custom_level)
+            self.config_manager.save_configs()
+        except Exception as e:
+            print(f"保存压缩设置失败: {e}")
+    
+    def load_compression_settings(self):
+        """从配置文件加载压缩设置"""
+        try:
+            # 获取保存的压缩模式
+            mode = self.config_manager.get_config("compression.default_mode", "fast")
+            custom_level = self.config_manager.get_config("compression.custom_level", 5)
+            
+            # 设置滑块值
+            self.compression_slider.setValue(custom_level)
+            self.compression_value_label.setText(str(custom_level))
+            
+            # 选择对应的单选按钮
+            if mode == "fast":
+                self.fast_compression_radio.setChecked(True)
+                self.custom_compression_widget.hide()
+            elif mode == "small":
+                self.small_compression_radio.setChecked(True)
+                self.custom_compression_widget.hide()
+            elif mode == "custom":
+                self.custom_compression_radio.setChecked(True)
+                self.custom_compression_widget.show()
+            else:
+                # 默认选择快速压缩
+                self.fast_compression_radio.setChecked(True)
+                self.custom_compression_widget.hide()
+                
+        except Exception as e:
+            print(f"加载压缩设置失败: {e}")
+            # 如果加载失败，使用默认设置
+            self.fast_compression_radio.setChecked(True)
+            self.custom_compression_widget.hide()
+        
     def update_ui_state(self):
         """更新界面状态"""
         has_files = len(self.selected_files) > 0
@@ -678,13 +816,14 @@ class CreateArchiveDialog(QDialog):
             return
                 
         # 获取压缩级别
-        compression_level = self.compression_group.checkedId()
-        if compression_level == -1:  # 如果没有选择，默认快速压缩
-            compression_level = 3
-            
+        compression_level = self.get_compression_level()
+        
         # 获取自定义选项
         delete_source = self.delete_source_check.isChecked()
         create_sfx = self.create_sfx_check.isChecked()
+        
+        # 保存压缩设置
+        self.save_compression_settings()
         
         # 如果选择后台压缩，最小化到托盘
         if self.is_background_mode:

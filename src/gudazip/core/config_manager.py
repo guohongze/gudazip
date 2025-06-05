@@ -198,14 +198,20 @@ class ConfigManager(QObject):
                         "双击操作", options=["open", "select", "preview"])
         self._add_config("behavior.show_hidden_files", False, ConfigCategory.BEHAVIOR,
                         "显示隐藏文件")
+        self._add_config("behavior.file_view_mode", "list", ConfigCategory.BEHAVIOR,
+                        "文件视图模式", options=["list", "icon", "detail"])
         self._add_config("behavior.auto_refresh", True, ConfigCategory.BEHAVIOR,
                         "自动刷新文件列表")
-        self._add_config("behavior.file_view_mode", "详细信息", ConfigCategory.BEHAVIOR,
-                        "文件视图模式", options=["详细信息", "图标"])
-        self._add_config("behavior.sort_column", 0, ConfigCategory.BEHAVIOR,
-                        "默认排序列", validator=lambda x: isinstance(x, int) and 0 <= x <= 3)
-        self._add_config("behavior.sort_order", 0, ConfigCategory.BEHAVIOR,
-                        "排序顺序", options=[0, 1])  # 0=升序, 1=降序
+        self._add_config("behavior.navigation_history_size", 20, ConfigCategory.BEHAVIOR,
+                        "导航历史记录数量", validator=lambda x: isinstance(x, int) and 1 <= x <= 100)
+        
+        # 压缩设置
+        self._add_config("compression.default_mode", "fast", ConfigCategory.BEHAVIOR,
+                        "默认压缩模式", options=["fast", "small", "custom"])
+        self._add_config("compression.custom_level", 5, ConfigCategory.BEHAVIOR,
+                        "自定义压缩级别", validator=lambda x: isinstance(x, int) and 0 <= x <= 9)
+        self._add_config("compression.default_format", "zip", ConfigCategory.BEHAVIOR,
+                        "默认压缩格式", options=["zip"])
         
         # 窗口设置
         self._add_config("window.remember_size", True, ConfigCategory.GENERAL,
@@ -490,9 +496,8 @@ class ConfigManager(QObject):
             'double_click_action': self.get_config('behavior.double_click_action', 'open'),
             'show_hidden_files': self.get_config('behavior.show_hidden_files', False),
             'auto_refresh': self.get_config('behavior.auto_refresh', True),
-            'file_view_mode': self.get_config('behavior.file_view_mode', '详细信息'),
-            'sort_column': self.get_config('behavior.sort_column', 0),
-            'sort_order': self.get_config('behavior.sort_order', 0)
+            'file_view_mode': self.get_config('behavior.file_view_mode', 'list'),
+            'navigation_history_size': self.get_config('behavior.navigation_history_size', 20)
         }
     
     def get_shortcut(self, action: str) -> str:
