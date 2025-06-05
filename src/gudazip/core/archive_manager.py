@@ -235,4 +235,37 @@ class ArchiveManager:
                 return info.get('files', [])
                 
         except Exception as e:
-            raise Exception(f"获取文件列表失败: {e}") 
+            raise Exception(f"获取文件列表失败: {e}")
+    
+    def add_files_to_archive(self, archive_path: str, files_to_add: List[str], 
+                            base_path: Optional[str] = None, 
+                            progress_callback=None) -> bool:
+        """向压缩包中添加文件"""
+        try:
+            if not self.is_archive_file(archive_path):
+                raise ValueError("不支持的压缩文件格式")
+            
+            # 验证输入参数
+            if not files_to_add:
+                raise ValueError("没有指定要添加的文件")
+            
+            # 检查所有文件是否存在
+            missing_files = [f for f in files_to_add if not os.path.exists(f)]
+            if missing_files:
+                raise FileNotFoundError(f"以下文件不存在：{', '.join(missing_files)}")
+            
+            _, ext = os.path.splitext(archive_path.lower())
+            handler = self.handlers.get(ext)
+            
+            if handler and hasattr(handler, 'add_files_to_archive'):
+                return handler.add_files_to_archive(archive_path, files_to_add, base_path, progress_callback)
+            else:
+                raise ValueError(f"不支持向 {ext} 格式的压缩包中添加文件")
+                
+        except Exception as e:
+            self.error_manager.handle_exception(
+                e,
+                context={"archive_path": archive_path, "files_to_add": files_to_add, "operation": "add_files_to_archive"},
+                category=ErrorCategory.ARCHIVE_OPERATION
+            )
+            raise Exception(f"添加文件失败: {e}") 

@@ -321,6 +321,12 @@ class MainWindow(QMainWindow):
         
     def new_archive(self):
         """新建压缩包"""
+        # 检查是否处于压缩包查看模式
+        if self.file_browser.archive_viewing_mode:
+            # 在压缩包查看模式下，"添加"按钮应该用于向压缩包中添加文件
+            self.add_files_to_archive()
+            return
+        
         # 获取当前选择的文件路径
         selected_paths = self.file_browser.get_selected_paths()
         current_path = self.file_browser.get_current_path()
@@ -387,6 +393,106 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             # 对话框中已经处理了创建过程
             self.path_label.setText("压缩包创建完成")
+    
+    def add_files_to_archive(self):
+        """向压缩包中添加文件"""
+        try:
+            # 弹出文件选择对话框
+            files, _ = QFileDialog.getOpenFileNames(
+                self, 
+                "选择要添加到压缩包的文件", 
+                "",
+                "所有文件 (*.*)"
+            )
+            
+            if not files:
+                return
+            
+            # 获取当前压缩包路径
+            archive_path = self.file_browser.current_archive_path
+            if not archive_path:
+                QMessageBox.warning(self, "错误", "无法获取当前压缩包路径")
+                return
+            
+            # 检查文件是否存在
+            existing_files = [f for f in files if os.path.exists(f)]
+            if not existing_files:
+                QMessageBox.warning(self, "错误", "选择的文件不存在")
+                return
+            
+            # 显示确认对话框
+            reply = QMessageBox.question(
+                self, 
+                "确认添加", 
+                f"确定要将 {len(existing_files)} 个文件添加到压缩包中吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                try:
+                    # 调用压缩包管理器添加文件
+                    success = self.archive_manager.add_files_to_archive(
+                        archive_path, 
+                        existing_files
+                    )
+                    
+                    if success:
+                        QMessageBox.information(self, "成功", f"成功添加了 {len(existing_files)} 个文件到压缩包")
+                        
+                        # 刷新压缩包视图
+                        self.refresh_archive_view()
+                    else:
+                        QMessageBox.warning(self, "失败", "添加文件失败")
+                        
+                except Exception as e:
+                    QMessageBox.critical(self, "错误", f"添加文件失败：{str(e)}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"添加文件时发生错误：{str(e)}")
+            # 记录详细错误信息
+            import traceback
+            print(f"添加文件错误详情：{traceback.format_exc()}")
+    
+    def refresh_archive_view(self):
+        """刷新压缩包视图"""
+        try:
+            if not self.file_browser.archive_viewing_mode:
+                return
+            
+            # 重新获取压缩包信息
+            archive_path = self.file_browser.current_archive_path
+            if archive_path and os.path.exists(archive_path):
+                archive_info = self.archive_manager.get_archive_info(archive_path)
+                if archive_info:
+                    # 更新文件浏览器的压缩包内容
+                    archive_files = archive_info.get('files', [])
+                    self.file_browser.archive_file_list = archive_files
+                    
+                    # 刷新显示
+                    self.file_browser.display_archive_directory_content()
+                    
+                    # 更新状态栏
+                    file_count = len(archive_files)
+                    total_size = archive_info.get('total_size', 0)
+                    compressed_size = archive_info.get('compressed_size', 0)
+                    
+                    def format_size(size_bytes):
+                        for unit in ['B', 'KB', 'MB', 'GB']:
+                            if size_bytes < 1024.0:
+                                return f"{size_bytes:.1f} {unit}"
+                            size_bytes /= 1024.0
+                        return f"{size_bytes:.1f} TB"
+                    
+                    status_text = f"压缩包：{os.path.basename(archive_path)} ({file_count} 个文件, " \
+                                 f"原始大小: {format_size(total_size)}, 压缩后: {format_size(compressed_size)})"
+                    self.path_label.setText(status_text)
+                    
+        except Exception as e:
+            print(f"刷新压缩包视图失败：{str(e)}")
+            # 记录详细错误信息
+            import traceback
+            print(f"刷新压缩包视图错误详情：{traceback.format_exc()}")
             
     def extract_archive(self):
         """解压压缩包"""

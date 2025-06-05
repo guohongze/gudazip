@@ -414,4 +414,132 @@ class ZipHandler:
             return files
             
         except Exception as e:
-            raise Exception(f"读取压缩包内容失败: {e}") 
+            raise Exception(f"读取压缩包内容失败: {e}")
+    
+    def add_files_to_archive(self, archive_path: str, files_to_add: List[str], 
+                            base_path: Optional[str] = None, 
+                            progress_callback=None) -> bool:
+        """向ZIP压缩包中添加文件"""
+        try:
+            # 验证输入参数
+            if not files_to_add:
+                raise ValueError("没有指定要添加的文件")
+                
+            # 检查压缩包是否存在
+            if not os.path.exists(archive_path):
+                raise FileNotFoundError(f"压缩包不存在：{archive_path}")
+                
+            # 检查所有要添加的文件是否存在
+            missing_files = [f for f in files_to_add if not os.path.exists(f)]
+            if missing_files:
+                raise FileNotFoundError(f"以下文件不存在: {', '.join(missing_files)}")
+            
+            # 检查权限
+            paths_to_check = files_to_add + [archive_path]
+            if not PermissionManager.request_admin_if_needed(paths_to_check, "添加文件到压缩包"):
+                return False
+            
+            if progress_callback:
+                progress_callback(0, "正在准备添加文件...")
+            
+            # 创建临时压缩包
+            temp_archive = archive_path + ".tmp"
+            
+            try:
+                # 读取原压缩包，复制所有文件到新压缩包
+                with zipfile.ZipFile(archive_path, 'r') as original_zf:
+                    with zipfile.ZipFile(temp_archive, 'w', zipfile.ZIP_DEFLATED) as new_zf:
+                        # 复制原有文件
+                        if progress_callback:
+                            progress_callback(10, "正在复制原有文件...")
+                        
+                        existing_files = original_zf.namelist()
+                        total_existing = len(existing_files)
+                        
+                        for i, item in enumerate(existing_files):
+                            # 读取原文件内容
+                            data = original_zf.read(item)
+                            # 写入到新压缩包
+                            new_zf.writestr(item, data)
+                            
+                            if progress_callback and total_existing > 0:
+                                progress = 10 + int((i / total_existing) * 30)  # 10-40%的范围
+                                progress_callback(progress, f"复制文件: {os.path.basename(item)}")
+                        
+                        # 添加新文件
+                        if progress_callback:
+                            progress_callback(40, "正在添加新文件...")
+                        
+                        total_new_files = len(files_to_add)
+                        for i, file_path in enumerate(files_to_add):
+                            if os.path.isfile(file_path):
+                                # 确定在压缩包中的路径
+                                if base_path:
+                                    # 使用相对于base_path的路径
+                                    arcname = os.path.relpath(file_path, base_path)
+                                else:
+                                    # 只使用文件名
+                                    arcname = os.path.basename(file_path)
+                                
+                                # 确保使用正斜杠作为分隔符
+                                arcname = arcname.replace('\\', '/')
+                                
+                                # 检查文件是否已存在
+                                if arcname in existing_files:
+                                    # 生成唯一的文件名
+                                    base_name, ext = os.path.splitext(arcname)
+                                    counter = 1
+                                    while f"{base_name}_{counter}{ext}" in existing_files:
+                                        counter += 1
+                                    arcname = f"{base_name}_{counter}{ext}"
+                                
+                                new_zf.write(file_path, arcname)
+                                
+                                if progress_callback:
+                                    progress = 40 + int((i / total_new_files) * 50)  # 40-90%的范围
+                                    progress_callback(progress, f"添加文件: {os.path.basename(file_path)}")
+                            
+                            elif os.path.isdir(file_path):
+                                # 添加目录及其内容
+                                for root, dirs, files in os.walk(file_path):
+                                    for file in files:
+                                        file_full_path = os.path.join(root, file)
+                                        # 计算压缩包内的路径
+                                        if base_path:
+                                            arcname = os.path.relpath(file_full_path, base_path)
+                                        else:
+                                            arcname = os.path.relpath(file_full_path, os.path.dirname(file_path))
+                                        
+                                        # 确保使用正斜杠
+                                        arcname = arcname.replace('\\', '/')
+                                        
+                                        new_zf.write(file_full_path, arcname)
+                
+                # 用新压缩包替换原压缩包
+                if progress_callback:
+                    progress_callback(95, "正在完成...")
+                
+                # 删除原文件，重命名临时文件
+                os.remove(archive_path)
+                os.rename(temp_archive, archive_path)
+                
+                if progress_callback:
+                    progress_callback(100, "添加完成")
+                
+                return True
+                
+            except Exception as e:
+                # 清理临时文件
+                if os.path.exists(temp_archive):
+                    try:
+                        os.remove(temp_archive)
+                    except:
+                        pass
+                raise e
+                
+        except zipfile.BadZipFile:
+            raise ValueError("无效的ZIP文件")
+        except PermissionError as e:
+            raise PermissionError(f"权限不足: {e}")
+        except Exception as e:
+            raise Exception(f"添加文件失败: {e}") 
