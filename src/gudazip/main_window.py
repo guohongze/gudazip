@@ -175,13 +175,13 @@ class MainWindow(QMainWindow):
     def setup_actions(self):
         """设置动作"""
         # 新建压缩包
-        self.action_new_archive = QAction("压缩", self)
+        self.action_new_archive = QAction("添加", self)
         self.action_new_archive.setIcon(qta.icon('fa5s.file-archive', color='#2e7d32'))
         self.action_new_archive.setShortcut("Ctrl+N")
         self.action_new_archive.triggered.connect(self.new_archive)
         
         # 解压到文件夹
-        self.action_extract = QAction("解压", self)
+        self.action_extract = QAction("解压到", self)
         self.action_extract.setIcon(qta.icon('fa5s.file-export', color='#1976d2'))
         self.action_extract.setShortcut("Ctrl+E")
         self.action_extract.triggered.connect(self.extract_archive)
@@ -379,16 +379,6 @@ class MainWindow(QMainWindow):
         for file_path in target_files:
             if os.path.exists(file_path):
                 dialog.selected_files.append(file_path)
-                if os.path.isfile(file_path):
-                    item_text = f"📄 {file_path}"
-                else:
-                    item_text = f"📁 {file_path}"
-                
-                from PySide6.QtWidgets import QListWidgetItem
-                from PySide6.QtCore import Qt
-                item = QListWidgetItem(item_text)
-                item.setData(Qt.UserRole, file_path)
-                dialog.files_list.addItem(item)
         
         # 更新对话框状态
         dialog.update_ui_state()
