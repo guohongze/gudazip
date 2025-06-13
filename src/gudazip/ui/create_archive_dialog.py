@@ -275,7 +275,7 @@ class CreateArchiveDialog(QDialog):
         # 格式选择
         compression_layout.addWidget(QLabel("格式:"))
         self.format_combo = QComboBox()
-        self.format_combo.addItems(["zip"])
+        self.format_combo.addItems(["zip", "7z"])
         self.format_combo.currentTextChanged.connect(self.on_format_changed)
         compression_layout.addWidget(self.format_combo)
         
@@ -599,7 +599,7 @@ class CreateArchiveDialog(QDialog):
         """浏览保存路径"""
         file_path, _ = QFileDialog.getSaveFileName(
             self, "保存压缩包", self.path_edit.text(),
-            "ZIP文件 (*.zip);;所有文件 (*.*)"
+            "ZIP文件 (*.zip);;7Z文件 (*.7z);;所有文件 (*.*)"
         )
         if file_path:
             self.path_edit.setText(file_path)
@@ -612,6 +612,8 @@ class CreateArchiveDialog(QDialog):
             base_path = os.path.splitext(current_path)[0]
             if "zip" in format_text.lower():
                 self.path_edit.setText(base_path + ".zip")
+            elif "7z" in format_text.lower():
+                self.path_edit.setText(base_path + ".7z")
                 
     def on_password_button_toggled(self, checked):
         """密码保护按钮切换"""
@@ -793,8 +795,12 @@ class CreateArchiveDialog(QDialog):
             return
             
         # 确保文件扩展名正确
-        if not archive_path.lower().endswith('.zip'):
+        selected_format = self.format_combo.currentText().lower()
+        if selected_format == "zip" and not archive_path.lower().endswith('.zip'):
             archive_path += '.zip'
+            self.path_edit.setText(archive_path)
+        elif selected_format == "7z" and not archive_path.lower().endswith('.7z'):
+            archive_path += '.7z'
             self.path_edit.setText(archive_path)
             
         # 检查文件是否已存在

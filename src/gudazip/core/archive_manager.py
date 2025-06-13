@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 
 from .zip_handler import ZipHandler
 from .rar_handler import RarHandler
+from .sevenzip_handler import SevenZipHandler
 from .permission_manager import PermissionManager
 from .error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
 
@@ -33,6 +34,11 @@ class ArchiveManager:
         rar_handler = RarHandler()
         for ext in rar_handler.supported_extensions:
             self.handlers[ext] = rar_handler
+        
+        # 7Z处理器
+        sevenzip_handler = SevenZipHandler()
+        for ext in sevenzip_handler.supported_extensions:
+            self.handlers[ext] = sevenzip_handler
             
     def is_archive_file(self, file_path: str) -> bool:
         """检查文件是否为支持的压缩包格式"""
