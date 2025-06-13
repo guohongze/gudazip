@@ -61,27 +61,6 @@ class CollapsibleWidget(QWidget):
         self.content_layout.addLayout(layout)
 
 
-class CollapsibleGroupBox(QGroupBox):
-    """可折叠的组框"""
-    
-    def __init__(self, title="", parent=None):
-        super().__init__(title, parent)
-        self.setCheckable(True)
-        self.setChecked(True)
-        self.toggled.connect(self.on_toggled)
-        
-    def on_toggled(self, checked):
-        """切换折叠状态"""
-        # 获取内容布局
-        layout = self.layout()
-        if layout:
-            # 隐藏或显示所有子控件
-            for i in range(layout.count()):
-                item = layout.itemAt(i)
-                if item.widget():
-                    item.widget().setVisible(checked)
-
-
 class ProgressBarWidget(QProgressBar):
     """美化的进度条组件"""
     
@@ -134,6 +113,11 @@ class CreateArchiveWorker(QThread):
         self.compression_level = compression_level
         self.password = password
         self.delete_source = delete_source
+        self._is_cancelled = False  # 取消标志
+        
+    def cancel(self):
+        """取消压缩任务"""
+        self._is_cancelled = True
         
     def run(self):
         """执行压缩任务"""
@@ -141,8 +125,15 @@ class CreateArchiveWorker(QThread):
             self.status.emit("正在准备压缩...")
             self.progress.emit(0)
             
+            # 检查是否已取消
+            if self._is_cancelled:
+                self.finished.emit(False, "压缩任务已取消")
+                return
+            
             # 定义进度回调函数
             def progress_callback(progress, status_text):
+                if self._is_cancelled:
+                    raise Exception("压缩任务已取消")
                 self.progress.emit(progress)
                 self.status.emit(status_text)
             
@@ -156,6 +147,11 @@ class CreateArchiveWorker(QThread):
             )
             
             if success:
+                # 检查是否已取消
+                if self._is_cancelled:
+                    self.finished.emit(False, "压缩任务已取消")
+                    return
+                    
                 # 如果需要删除源文件
                 if self.delete_source:
                     self.status.emit("正在删除源文件...")
@@ -163,13 +159,19 @@ class CreateArchiveWorker(QThread):
                     try:
                         import shutil
                         for file_path in self.files:
+                            if self._is_cancelled:
+                                self.finished.emit(False, "压缩任务已取消")
+                                return
                             if os.path.exists(file_path):
                                 if os.path.isfile(file_path):
                                     os.remove(file_path)
                                 elif os.path.isdir(file_path):
                                     shutil.rmtree(file_path)
                     except Exception as e:
-                        self.finished.emit(False, f"压缩包创建成功，但删除源文件失败：{str(e)}")
+                        if "压缩任务已取消" in str(e):
+                            self.finished.emit(False, "压缩任务已取消")
+                        else:
+                            self.finished.emit(False, f"压缩包创建成功，但删除源文件失败：{str(e)}")
                         return
                 
                 self.progress.emit(100)
@@ -179,7 +181,10 @@ class CreateArchiveWorker(QThread):
                 self.finished.emit(False, "创建压缩包失败")
                 
         except Exception as e:
-            self.finished.emit(False, f"创建压缩包时发生错误：{str(e)}")
+            if "压缩任务已取消" in str(e) or self._is_cancelled:
+                self.finished.emit(False, "压缩任务已取消")
+            else:
+                self.finished.emit(False, f"创建压缩包时发生错误：{str(e)}")
 
 
 class CreateArchiveDialog(QDialog):
@@ -208,6 +213,10 @@ class CreateArchiveDialog(QDialog):
         self.setWindowTitle("创建压缩包")
         self.setMinimumSize(450, 240)  # 设置最小尺寸而不是固定尺寸
         self.setMaximumSize(450, 400)  # 设置最大尺寸以避免过度拉伸
+        
+        # 设置窗口标志以包含最小化按钮
+        self.setWindowFlags(Qt.Dialog | Qt.WindowMinimizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # 使用 GudaZip 图标
         try:
             import os
@@ -404,12 +413,12 @@ class CreateArchiveDialog(QDialog):
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                           stop:0 #2E7D32, stop:1 #1B5E20);
                 border: 3px solid #1B5E20;
-                color: white;
+                color: #E8F5E8;
             }
             QPushButton:disabled {
-                background: #BDBDBD;
-                border: 3px solid #9E9E9E;
-                color: #757575;
+                background-color: #CCCCCC;
+                border: 3px solid #AAAAAA;
+                color: #666666;
             }
         """)
         self.create_button.clicked.connect(self.create_archive)
@@ -417,137 +426,12 @@ class CreateArchiveDialog(QDialog):
         
         layout.addLayout(bottom_layout)
         
-        # 更新界面状态
+        # 调整对话框的初始高度
+        self.adjust_dialog_height()
+        
+        # 设置文件列表更新
         self.update_ui_state()
-        
-    def create_archive_settings_group(self):
-        """创建压缩包设置组（包含所有选项）"""
-        group = QGroupBox("压缩包设置")
-        layout = QVBoxLayout(group)
-        layout.setSpacing(8)  # 减少间距
-        
-        # 压缩包路径
-        path_layout = QHBoxLayout()
-        path_layout.addWidget(QLabel("保存到:"))
-        
-        self.path_edit = QLineEdit()
-        self.path_edit.setText(self.initial_path)
-        self.path_edit.setPlaceholderText("选择压缩包保存位置...")
-        path_layout.addWidget(self.path_edit)
-        
-        self.browse_button = QPushButton("浏览...")
-        self.browse_button.clicked.connect(self.browse_save_path)
-        path_layout.addWidget(self.browse_button)
-        
-        layout.addLayout(path_layout)
-        
-        # 压缩级别和格式选择一行
-        compression_layout = QHBoxLayout()
-        
-        self.compression_group = QButtonGroup()
-        
-        # 快速压缩（默认选择）
-        self.fast_compression_radio = QRadioButton("快速压缩")
-        self.fast_compression_radio.setChecked(True)
-        self.compression_group.addButton(self.fast_compression_radio, 3)  # 压缩率3
-        compression_layout.addWidget(self.fast_compression_radio)
-        
-        # 较小体积（原极致压缩）
-        self.small_compression_radio = QRadioButton("较小体积")
-        self.compression_group.addButton(self.small_compression_radio, 6)  # 压缩率6
-        compression_layout.addWidget(self.small_compression_radio)
-        
-        # 自定比率
-        self.custom_compression_radio = QRadioButton("自定比率")
-        self.compression_group.addButton(self.custom_compression_radio, -1)  # 使用-1标识自定义
-        self.custom_compression_radio.toggled.connect(self.on_custom_compression_toggled)
-        compression_layout.addWidget(self.custom_compression_radio)
-        
-        compression_layout.addStretch()
-        layout.addLayout(compression_layout)
-        
-        # 自定义压缩比率滑块（初始隐藏）
-        self.custom_compression_widget = QWidget()
-        custom_layout = QHBoxLayout(self.custom_compression_widget)
-        custom_layout.setContentsMargins(20, 0, 0, 0)
-        
-        custom_layout.addWidget(QLabel("压缩级别:"))
-        
-        self.compression_slider = QSlider(Qt.Horizontal)
-        self.compression_slider.setMinimum(0)
-        self.compression_slider.setMaximum(9)
-        self.compression_slider.setValue(5)
-        self.compression_slider.setTickPosition(QSlider.TicksBelow)
-        self.compression_slider.setTickInterval(1)
-        self.compression_slider.valueChanged.connect(self.on_slider_value_changed)
-        custom_layout.addWidget(self.compression_slider)
-        
-        self.compression_value_label = QLabel("5")
-        self.compression_value_label.setMinimumWidth(20)
-        custom_layout.addWidget(self.compression_value_label)
-        
-        custom_layout.addWidget(QLabel("(0=不压缩, 9=最大压缩)"))
-        custom_layout.addStretch()
-        
-        self.custom_compression_widget.hide()  # 默认隐藏
-        layout.addWidget(self.custom_compression_widget)
-        
-        # 按钮行：密码保护和自定义选项
-        button_layout = QHBoxLayout()
-        
-        # 密码保护按钮
-        self.password_button = QPushButton("密码保护")
-        self.password_button.setCheckable(True)
-        self.password_button.toggled.connect(self.on_password_button_toggled)
-        button_layout.addWidget(self.password_button)
-        
-        # 自定义选项按钮
-        self.custom_options_button = QPushButton("自定义选项")
-        self.custom_options_button.setCheckable(True)
-        self.custom_options_button.toggled.connect(self.on_custom_options_button_toggled)
-        button_layout.addWidget(self.custom_options_button)
-        
-        button_layout.addStretch()
-        layout.addLayout(button_layout)
-        
-        # 可折叠的密码输入区域
-        self.password_widget = QWidget()
-        password_layout = QVBoxLayout(self.password_widget)
-        password_layout.setContentsMargins(15, 5, 0, 5)
-        
-        self.password_edit = QLineEdit()
-        self.password_edit.setEchoMode(QLineEdit.Password)
-        self.password_edit.setPlaceholderText("输入密码...")
-        password_layout.addWidget(self.password_edit)
-        
-        self.password_widget.hide()  # 默认隐藏
-        layout.addWidget(self.password_widget)
-        
-        # 可折叠的自定义选项区域
-        self.custom_options_widget = QWidget()
-        custom_layout = QVBoxLayout(self.custom_options_widget)
-        custom_layout.setContentsMargins(15, 5, 0, 5)
-        custom_layout.setSpacing(5)
-        
-        # 压缩后删除源文件
-        self.delete_source_check = QCheckBox("压缩后删除源文件")
-        custom_layout.addWidget(self.delete_source_check)
-        
-        # 后台压缩功能
-        self.background_compress_check = QCheckBox("后台压缩")
-        self.background_compress_check.toggled.connect(self.on_background_toggled)
-        custom_layout.addWidget(self.background_compress_check)
-        
-        # 后台压缩说明
-        background_desc = QLabel("启用后将最小化到系统托盘")
-        background_desc.setStyleSheet("color: #666666; font-size: 9px; margin-left: 15px;")
-        custom_layout.addWidget(background_desc)
-        
-        self.custom_options_widget.hide()  # 默认隐藏
-        layout.addWidget(self.custom_options_widget)
-        
-        return group
-        
+    
     def create_progress_frame(self):
         """创建进度区域"""
         frame = QFrame()
@@ -565,34 +449,31 @@ class CreateArchiveDialog(QDialog):
         self.status_label.setStyleSheet("font-size: 10px; color: #666666;")
         layout.addWidget(self.status_label)
         
-        self.progress_frame = frame
-        return frame
+        # 添加取消按钮
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
         
-    def create_buttons_frame(self):
-        """创建按钮区域"""
-        frame = QFrame()
-        layout = QHBoxLayout(frame)
-        
-        # 状态标签
-        self.info_label = QLabel("")
-        self.info_label.setStyleSheet("color: #666666; font-size: 10px;")
-        layout.addWidget(self.info_label)
-        
-        layout.addStretch()
-        
-        # 创建压缩包按钮 - 放大尺寸
-        self.create_button = QPushButton("创建压缩包")
-        self.create_button.setMinimumSize(120, 35)  # 设置最小尺寸
-        self.create_button.setStyleSheet("""
+        # 取消按钮
+        self.cancel_button = QPushButton("取消压缩")
+        self.cancel_button.setStyleSheet("""
             QPushButton {
-                font-size: 13px;
-                font-weight: bold;
-                padding: 8px 16px;
+                background-color: #F44336;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #D32F2F;
             }
         """)
-        self.create_button.clicked.connect(self.create_archive)
-        layout.addWidget(self.create_button)
+        self.cancel_button.clicked.connect(self.cancel_compression)
+        button_layout.addWidget(self.cancel_button)
         
+        layout.addLayout(button_layout)
+        
+        self.progress_frame = frame
         return frame
         
     def browse_save_path(self):
@@ -777,6 +658,40 @@ class CreateArchiveDialog(QDialog):
             self.create_button.setEnabled(False)
             self.info_label.setText("请在主界面选择要压缩的文件或文件夹")
             self.info_label.setStyleSheet("color: #666666; font-size: 10px;")
+    
+    def changeEvent(self, event):
+        """处理窗口状态变化事件"""
+        if event.type() == event.Type.WindowStateChange:
+            # 如果窗口被最小化，同时最小化主程序窗口
+            if self.isMinimized():
+                try:
+                    if self.parent():
+                        self.parent().showMinimized()
+                except Exception as e:
+                    print(f"最小化主程序窗口失败: {e}")
+        super().changeEvent(event)
+    
+    def cancel_compression(self):
+        """取消压缩任务"""
+        if self.worker and self.worker.isRunning():
+            # 设置取消标志
+            self.worker.cancel()
+            
+            # 等待线程结束
+            if not self.worker.wait(3000):  # 等待3秒
+                self.worker.terminate()  # 强制终止
+                self.worker.wait()
+            
+            # 更新界面状态
+            self.progress_frame.setVisible(False)
+            self.create_button.setEnabled(True)
+            
+            # 调整窗口高度
+            QTimer.singleShot(0, self.adjust_dialog_height)
+            
+            # 显示取消消息
+            self.info_label.setText("压缩任务已取消")
+            self.info_label.setStyleSheet("color: #FF9800; font-size: 10px;")
             
     def create_archive(self):
         """创建压缩包"""
@@ -847,6 +762,8 @@ class CreateArchiveDialog(QDialog):
         self.progress_bar.setValue(0)
         self.status_label.setText("准备开始...")
         
+
+        
         # 动态调整窗口高度
         QTimer.singleShot(0, self.adjust_dialog_height)
         
@@ -870,6 +787,7 @@ class CreateArchiveDialog(QDialog):
         
         # 启动线程
         self.worker.start()
+        
     def submit_background_task(self, archive_path, compression_level, password, delete_source):
         """提交后台压缩任务"""
         from .background_task_manager import get_background_task_manager
@@ -912,6 +830,8 @@ class CreateArchiveDialog(QDialog):
         self.progress_frame.setVisible(False)
         self.create_button.setEnabled(True)
         
+
+        
         # 动态调整窗口高度
         QTimer.singleShot(0, self.adjust_dialog_height)
         
@@ -919,7 +839,12 @@ class CreateArchiveDialog(QDialog):
             QMessageBox.information(self, "成功", message)
             self.accept()
         else:
-            QMessageBox.critical(self, "错误", message)
+            if "压缩任务已取消" in message:
+                # 如果是取消任务，不显示错误对话框，只更新状态
+                self.info_label.setText(message)
+                self.info_label.setStyleSheet("color: #FF9800; font-size: 10px;")
+            else:
+                QMessageBox.critical(self, "错误", message)
             
         # 清理工作线程
         if self.worker:
