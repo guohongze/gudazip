@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QFont, QPalette, QColor, QIcon, QAction
-import qtawesome as qta
+
 from ..core.permission_manager import PermissionManager
 from ..core.config_manager import get_config_manager
 
@@ -126,7 +126,7 @@ class CreateArchiveWorker(QThread):
     finished = Signal(bool, str)  # 完成信号 (成功, 消息)
     
     def __init__(self, archive_manager, archive_path, files, compression_level=6, 
-                 password=None, delete_source=False, create_sfx=False):
+                 password=None, delete_source=False):
         super().__init__()
         self.archive_manager = archive_manager
         self.archive_path = archive_path
@@ -134,7 +134,6 @@ class CreateArchiveWorker(QThread):
         self.compression_level = compression_level
         self.password = password
         self.delete_source = delete_source
-        self.create_sfx = create_sfx
         
     def run(self):
         """执行压缩任务"""
@@ -157,14 +156,6 @@ class CreateArchiveWorker(QThread):
             )
             
             if success:
-                # 如果需要创建自解压文件
-                if self.create_sfx:
-                    self.status.emit("正在创建自解压文件...")
-                    self.progress.emit(95)
-                    # TODO: 实现自解压文件创建
-                    # 这里可以调用archive_manager的相关方法
-                    pass
-                
                 # 如果需要删除源文件
                 if self.delete_source:
                     self.status.emit("正在删除源文件...")
@@ -201,98 +192,34 @@ class CreateArchiveDialog(QDialog):
         self.selected_files = []
         self.worker = None
         self.is_background_mode = False
-        self.tray_icon = None
         
         # 获取配置管理器
         self.config_manager = get_config_manager(parent)
         
         self.init_ui()
-        self.setup_system_tray()
         self.load_compression_settings()
         
-    def setup_system_tray(self):
-        """设置系统托盘"""
-        # 检查系统是否支持托盘
-        if not QSystemTrayIcon.isSystemTrayAvailable():
-            return
-            
-        # 创建托盘图标
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(qta.icon('fa5s.file-archive', color='#2e7d32'))
+
         
-        # 创建托盘菜单
-        tray_menu = QMenu()
-        
-        # 恢复窗口
-        restore_action = QAction("恢复窗口", self)
-        restore_action.triggered.connect(self.restore_from_tray)
-        tray_menu.addAction(restore_action)
-        
-        # 分隔符
-        tray_menu.addSeparator()
-        
-        # 取消压缩
-        cancel_action = QAction("取消压缩", self)
-        cancel_action.triggered.connect(self.cancel_compression)
-        tray_menu.addAction(cancel_action)
-        
-        self.tray_icon.setContextMenu(tray_menu)
-        
-        # 双击托盘图标恢复窗口
-        self.tray_icon.activated.connect(self.on_tray_icon_activated)
-        
-    def on_tray_icon_activated(self, reason):
-        """托盘图标激活事件"""
-        if reason == QSystemTrayIcon.DoubleClick:
-            self.restore_from_tray()
-            
-    def restore_from_tray(self):
-        """从托盘恢复窗口"""
-        self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        
-        # 隐藏托盘图标
-        if self.tray_icon:
-            self.tray_icon.hide()
-    
-    def minimize_to_tray(self):
-        """最小化到托盘"""
-        if self.tray_icon and QSystemTrayIcon.isSystemTrayAvailable():
-            self.hide()
-            self.tray_icon.show()
-            
-            # 显示托盘消息
-            self.tray_icon.showMessage(
-                "GudaZip",
-                "压缩任务正在后台运行，双击图标可恢复窗口",
-                QSystemTrayIcon.Information,
-                3000
-            )
-        else:
-            # 如果不支持托盘，只是最小化窗口
-            self.showMinimized()
-    
-    def cancel_compression(self):
-        """取消压缩任务"""
-        if self.worker and self.worker.isRunning():
-            reply = QMessageBox.question(
-                self, "确认", "确定要取消压缩任务吗？",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply == QMessageBox.Yes:
-                self.worker.terminate()
-                self.worker.wait()
-                self.reject()
+
     
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("创建压缩包")
         self.setMinimumSize(450, 240)  # 设置最小尺寸而不是固定尺寸
         self.setMaximumSize(450, 400)  # 设置最大尺寸以避免过度拉伸
-        self.setWindowIcon(qta.icon('fa5s.file-archive', color='#2e7d32'))
+        # 使用 GudaZip 图标
+        try:
+            import os
+            from PySide6.QtGui import QIcon
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # 从 src/gudazip/ui/ 上升到项目根目录
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            icon_path = os.path.join(project_root, "resources", "icons", "gudazip.ico")
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
         
         # 记录基础高度
         self.base_height = 240
@@ -421,9 +348,7 @@ class CreateArchiveDialog(QDialog):
         # 自定义选项使用紧凑布局
         options_row1 = QHBoxLayout()
         self.delete_source_check = QCheckBox("压缩后删除源文件")
-        self.create_sfx_check = QCheckBox("创建自解压文件")
         options_row1.addWidget(self.delete_source_check)
-        options_row1.addWidget(self.create_sfx_check)
         options_row1.addStretch()
         custom_layout.addLayout(options_row1)
         
@@ -607,10 +532,6 @@ class CreateArchiveDialog(QDialog):
         # 压缩后删除源文件
         self.delete_source_check = QCheckBox("压缩后删除源文件")
         custom_layout.addWidget(self.delete_source_check)
-        
-        # 创建自解压文件
-        self.create_sfx_check = QCheckBox("创建自解压文件")
-        custom_layout.addWidget(self.create_sfx_check)
         
         # 后台压缩功能
         self.background_compress_check = QCheckBox("后台压缩")
@@ -906,14 +827,14 @@ class CreateArchiveDialog(QDialog):
         
         # 获取自定义选项
         delete_source = self.delete_source_check.isChecked()
-        create_sfx = self.create_sfx_check.isChecked()
         
         # 保存压缩设置
         self.save_compression_settings()
         
-        # 如果选择后台压缩，最小化到托盘
+        # 如果选择后台压缩，提交给后台任务管理器
         if self.is_background_mode:
-            self.minimize_to_tray()
+            self.submit_background_task(archive_path, compression_level, password, delete_source)
+            return
         
         # 显示进度界面
         self.progress_frame.setVisible(True)
@@ -933,8 +854,7 @@ class CreateArchiveDialog(QDialog):
             self.selected_files,
             compression_level,
             password,
-            delete_source,
-            create_sfx
+            delete_source
         )
         
         # 连接信号
@@ -944,24 +864,42 @@ class CreateArchiveDialog(QDialog):
         
         # 启动线程
         self.worker.start()
+    def submit_background_task(self, archive_path, compression_level, password, delete_source):
+        """提交后台压缩任务"""
+        from .background_task_manager import get_background_task_manager
+        import uuid
+        
+        # 生成任务ID
+        task_id = str(uuid.uuid4())
+        
+        # 创建任务名称
+        archive_name = os.path.basename(archive_path)
+        task_name = f"压缩: {archive_name}"
+        
+        # 创建工作线程
+        worker = CreateArchiveWorker(
+            self.archive_manager,
+            archive_path,
+            self.selected_files,
+            compression_level,
+            password,
+            delete_source
+        )
+        
+        # 提交给后台任务管理器
+        task_manager = get_background_task_manager()
+        task_manager.add_task(task_id, task_name, "压缩", worker)
+        
+        # 启动工作线程
+        worker.start()
+        
+        # 关闭对话框
+        QMessageBox.information(self, "后台任务", "压缩任务已提交到后台运行，您可以关闭此窗口。")
+        self.accept()
         
     def on_progress_updated(self, value):
         """进度更新"""
         self.progress_bar.setValue(value)
-        
-        # 如果是后台模式，更新托盘工具提示
-        if self.is_background_mode and self.tray_icon:
-            self.tray_icon.setToolTip(f"GudaZip - 压缩进度: {value}%")
-        
-    def show_completion_notification(self):
-        """显示完成通知"""
-        if self.tray_icon and self.is_background_mode:
-            self.tray_icon.showMessage(
-                "GudaZip",
-                "压缩任务已完成！",
-                QSystemTrayIcon.Information,
-                5000
-            )
         
     def on_create_finished(self, success, message):
         """创建完成"""
@@ -970,12 +908,6 @@ class CreateArchiveDialog(QDialog):
         
         # 动态调整窗口高度
         QTimer.singleShot(0, self.adjust_dialog_height)
-        
-        # 如果是后台模式，恢复窗口并显示通知
-        if self.is_background_mode:
-            self.restore_from_tray()
-            if success:
-                self.show_completion_notification()
         
         if success:
             QMessageBox.information(self, "成功", message)
@@ -1003,10 +935,6 @@ class CreateArchiveDialog(QDialog):
                 event.ignore()
                 return
                 
-        # 隐藏托盘图标
-        if self.tray_icon:
-            self.tray_icon.hide()
-            
         event.accept()
 
     def adjust_dialog_height(self):

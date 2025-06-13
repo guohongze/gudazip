@@ -7,10 +7,12 @@
 import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QPushButton, QGroupBox, QProgressBar, QFileDialog, QMessageBox
+    QPushButton, QGroupBox, QProgressBar, QFileDialog, QMessageBox,
+    QCheckBox, QSystemTrayIcon, QMenu
 )
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtGui import QFont, QAction
+
 
 
 class ProgressBarWidget(QProgressBar):
@@ -132,6 +134,7 @@ class ExtractArchiveDialog(QDialog):
         self.selected_files = selected_files  # 要解压的特定文件（None表示解压全部）
         self.archive_info = None
         self.worker = None
+        self.is_background_mode = False
         
         # 获取压缩包信息
         try:
@@ -143,14 +146,30 @@ class ExtractArchiveDialog(QDialog):
             
         self.init_ui()
         
+
+        
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("解压压缩包")
-        self.setMinimumSize(500, 300)
-        self.resize(500, 300)
+        self.setMinimumSize(500, 320)
+        self.resize(500, 320)
+        # 使用 GudaZip 图标
+        try:
+            import os
+            from PySide6.QtGui import QIcon
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # 从 src/gudazip/ui/ 上升到项目根目录
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            icon_path = os.path.join(project_root, "resources", "icons", "gudazip.ico")
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
         
         # 主布局
         layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
         
         # 压缩包信息组
         info_group = QGroupBox("压缩包信息")
@@ -217,6 +236,18 @@ class ExtractArchiveDialog(QDialog):
         else:
             self.password_edit = None
         
+        # 后台解压选项
+        background_layout = QHBoxLayout()
+        self.background_extract_check = QCheckBox("后台解压")
+        self.background_extract_check.toggled.connect(self.on_background_toggled)
+        background_layout.addWidget(self.background_extract_check)
+        
+        background_desc = QLabel("(最小化到系统托盘)")
+        background_desc.setStyleSheet("color: #666666; font-size: 9px;")
+        background_layout.addWidget(background_desc)
+        background_layout.addStretch()
+        options_layout.addLayout(background_layout)
+        
         layout.addWidget(options_group)
         
         # 进度条和状态
@@ -232,6 +263,22 @@ class ExtractArchiveDialog(QDialog):
         # 按钮
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
+        
+        self.cancel_button = QPushButton("取消")
+        self.cancel_button.clicked.connect(self.reject)
+        self.cancel_button.setStyleSheet("""
+        QPushButton {
+            background-color: #f5f5f5;
+            border: 1px solid #cccccc;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: #eeeeee;
+        }
+        """)
+        buttons_layout.addWidget(self.cancel_button)
         
         self.extract_button = QPushButton("开始解压")
         self.extract_button.clicked.connect(self.extract_archive)
@@ -259,27 +306,29 @@ class ExtractArchiveDialog(QDialog):
         
         layout.addLayout(buttons_layout)
         
+    def on_background_toggled(self, checked):
+        """后台解压选项切换"""
+        self.is_background_mode = checked
+        
     def format_size(self, size_bytes):
         """格式化文件大小"""
         if size_bytes == 0:
             return "0 B"
-        
         size_names = ["B", "KB", "MB", "GB", "TB"]
-        i = 0
-        while size_bytes >= 1024 and i < len(size_names) - 1:
-            size_bytes /= 1024.0
-            i += 1
-            
-        return f"{size_bytes:.1f} {size_names[i]}"
-            
+        import math
+        i = int(math.floor(math.log(size_bytes, 1024)))
+        p = math.pow(1024, i)
+        s = round(size_bytes / p, 2)
+        return f"{s} {size_names[i]}"
+        
     def browse_target_path(self):
         """浏览目标路径"""
-        dir_path = QFileDialog.getExistingDirectory(
+        path = QFileDialog.getExistingDirectory(
             self, "选择解压目标文件夹", self.target_edit.text()
         )
-        if dir_path:
-            self.target_edit.setText(dir_path)
-        
+        if path:
+            self.target_edit.setText(path)
+            
     def extract_archive(self):
         """开始解压"""
         extract_to = self.target_edit.text().strip()
@@ -291,7 +340,7 @@ class ExtractArchiveDialog(QDialog):
         password = None
         if self.password_edit:
             password = self.password_edit.text() if self.password_edit.text() else None
-                
+        
         # 确保目标目录存在
         try:
             os.makedirs(extract_to, exist_ok=True)
@@ -299,9 +348,15 @@ class ExtractArchiveDialog(QDialog):
             QMessageBox.critical(self, "错误", f"无法创建目标目录：{str(e)}")
             return
             
+        # 如果选择后台解压，提交给后台任务管理器
+        if self.is_background_mode:
+            self.submit_background_task(extract_to, password)
+            return
+            
         # 禁用界面
         self.extract_button.setEnabled(False)
         self.extract_button.setText("解压中...")
+        self.cancel_button.setText("停止")
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
@@ -315,18 +370,55 @@ class ExtractArchiveDialog(QDialog):
         )
         
         # 连接信号
-        self.worker.progress.connect(self.progress_bar.setValue)
+        self.worker.progress.connect(self.on_progress_updated)
         self.worker.status.connect(self.status_label.setText)
         self.worker.finished.connect(self.on_extract_finished)
         
         # 启动线程
         self.worker.start()
         
+    def submit_background_task(self, extract_to, password):
+        """提交后台解压任务"""
+        from .background_task_manager import get_background_task_manager
+        import uuid
+        
+        # 生成任务ID
+        task_id = str(uuid.uuid4())
+        
+        # 创建任务名称
+        archive_name = os.path.basename(self.archive_path)
+        task_name = f"解压: {archive_name}"
+        
+        # 创建工作线程
+        worker = ExtractArchiveWorker(
+            self.archive_manager,
+            self.archive_path,
+            extract_to,
+            password,
+            self.selected_files
+        )
+        
+        # 提交给后台任务管理器
+        task_manager = get_background_task_manager()
+        task_manager.add_task(task_id, task_name, "解压", worker)
+        
+        # 启动工作线程
+        worker.start()
+        
+        # 关闭对话框
+        QMessageBox.information(self, "后台任务", "解压任务已提交到后台运行，您可以关闭此窗口。")
+        self.accept()
+        
+    def on_progress_updated(self, value):
+        """进度更新"""
+        self.progress_bar.setValue(value)
+        
     def on_extract_finished(self, success, message):
         """解压完成"""
         self.progress_bar.setVisible(False)
         self.extract_button.setEnabled(True)
         self.extract_button.setText("开始解压")
+        self.cancel_button.setText("取消")
         
         if success:
             QMessageBox.information(self, "成功", message)
@@ -371,5 +463,7 @@ class ExtractArchiveDialog(QDialog):
         if self.worker:
             self.worker.deleteLater()
             self.worker = None
+            
+
                 
         event.accept() 
