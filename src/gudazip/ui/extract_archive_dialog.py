@@ -8,7 +8,7 @@ import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QGroupBox, QProgressBar, QFileDialog, QMessageBox,
-    QCheckBox, QSystemTrayIcon, QMenu
+    QCheckBox, QSystemTrayIcon, QMenu, QWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QAction
@@ -34,12 +34,14 @@ class ProgressBarWidget(QProgressBar):
             font-size: 12px;
             color: #333333;
             height: 24px;
+            min-width: 200px;  /* 确保进度条有最小宽度 */
         }
         
         QProgressBar::chunk {
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                       stop:0 #2196F3, stop:0.5 #42A5F5, stop:1 #64B5F6);
             border-radius: 6px;
+            margin: 1px;  /* 增加边距，避免进度条边框重叠 */
         }
         
         QProgressBar[value="0"] {
@@ -48,6 +50,13 @@ class ProgressBarWidget(QProgressBar):
         
         QProgressBar[value="100"] {
             color: #ffffff;
+            font-weight: bold;
+        }
+        
+        /* 增加进度条文本的可读性 */
+        QProgressBar:chunk:selected {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                      stop:0 #1976D2, stop:0.5 #1E88E5, stop:1 #42A5F5);
         }
         """)
 
@@ -151,8 +160,8 @@ class ExtractArchiveDialog(QDialog):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("解压压缩包")
-        self.setMinimumSize(500, 320)
-        self.resize(500, 320)
+        self.setMinimumSize(520, 380)  # 增加最小尺寸以容纳进度条
+        self.resize(520, 380)
         # 使用 GudaZip 图标
         try:
             import os
@@ -173,30 +182,45 @@ class ExtractArchiveDialog(QDialog):
         
         # 压缩包信息组
         info_group = QGroupBox("压缩包信息")
+        info_group.setMinimumHeight(120)  # 设置最小高度防止被压缩
         info_layout = QVBoxLayout(info_group)
+        info_layout.setSpacing(6)  # 设置适当的间距
         
         # 压缩包路径
         archive_name = os.path.basename(self.archive_path)
-        info_layout.addWidget(QLabel(f"文件名: {archive_name}"))
+        filename_label = QLabel(f"文件名: {archive_name}")
+        filename_label.setWordWrap(True)  # 启用文本换行
+        filename_label.setMinimumHeight(20)  # 设置最小高度
+        info_layout.addWidget(filename_label)
         
         if self.archive_info:
-            info_layout.addWidget(QLabel(f"格式: {self.archive_info['format']}"))
+            format_label = QLabel(f"格式: {self.archive_info['format']}")
+            format_label.setMinimumHeight(20)
+            info_layout.addWidget(format_label)
             
             # 显示解压信息
             if self.selected_files:
-                info_layout.addWidget(QLabel(f"解压文件数: {len(self.selected_files)} 个选中文件"))
+                files_label = QLabel(f"解压文件数: {len(self.selected_files)} 个选中文件")
             else:
-                info_layout.addWidget(QLabel(f"解压文件数: {self.archive_info['file_count']} 个文件（全部）"))
+                files_label = QLabel(f"解压文件数: {self.archive_info['file_count']} 个文件（全部）")
+            files_label.setMinimumHeight(20)
+            info_layout.addWidget(files_label)
             
             # 格式化文件大小
             total_size = self.archive_info['total_size']
             size_str = self.format_size(total_size)
-            info_layout.addWidget(QLabel(f"原始大小: {size_str}"))
+            size_label = QLabel(f"原始大小: {size_str}")
+            size_label.setMinimumHeight(20)
+            info_layout.addWidget(size_label)
             
             if self.archive_info['has_password']:
                 password_label = QLabel("🔒 此压缩包需要密码")
                 password_label.setStyleSheet("color: orange; font-weight: bold;")
+                password_label.setMinimumHeight(20)
                 info_layout.addWidget(password_label)
+        
+        # 添加一个弹性空间，确保信息组不会被压缩
+        info_layout.addStretch()
         
         layout.addWidget(info_group)
         
@@ -250,15 +274,26 @@ class ExtractArchiveDialog(QDialog):
         
         layout.addWidget(options_group)
         
-        # 进度条和状态
+        # 进度条容器 - 使用固定高度的容器确保布局稳定
+        progress_container = QWidget()
+        progress_container.setFixedHeight(40)  # 固定高度，无论进度条是否可见
+        progress_layout = QVBoxLayout(progress_container)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(4)
+        
+        # 进度条
         self.progress_bar = ProgressBarWidget()
         self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.progress_bar)
         
+        # 状态标签
         self.status_label = QLabel("准备解压")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setStyleSheet("font-size: 10px; color: #666666;")
-        layout.addWidget(self.status_label)
+        self.status_label.setMinimumHeight(16)  # 确保状态标签有足够高度
+        progress_layout.addWidget(self.status_label)
+        
+        layout.addWidget(progress_container)
         
         # 按钮
         buttons_layout = QHBoxLayout()
@@ -411,19 +446,58 @@ class ExtractArchiveDialog(QDialog):
         
     def on_progress_updated(self, value):
         """进度更新"""
-        self.progress_bar.setValue(value)
+        # 使用平滑的进度更新
+        current_value = self.progress_bar.value()
+        if abs(value - current_value) > 1:
+            # 如果进度跨度较大，使用动画效果
+            self.animate_progress(current_value, value)
+        else:
+            self.progress_bar.setValue(value)
+        
+        # 更新窗口标题显示进度
+        if value > 0:
+            self.setWindowTitle(f"解压压缩包 - {value}%")
+        else:
+            self.setWindowTitle("解压压缩包")
+    
+    def animate_progress(self, start_value, end_value):
+        """平滑的进度条动画"""
+        try:
+            from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+            
+            # 创建属性动画
+            self.progress_animation = QPropertyAnimation(self.progress_bar, b"value")
+            self.progress_animation.setDuration(200)  # 200ms 动画时长
+            self.progress_animation.setStartValue(start_value)
+            self.progress_animation.setEndValue(end_value)
+            self.progress_animation.setEasingCurve(QEasingCurve.OutCubic)
+            self.progress_animation.start()
+        except Exception:
+            # 如果动画失败，直接设置值
+            self.progress_bar.setValue(end_value)
         
     def on_extract_finished(self, success, message):
         """解压完成"""
+        # 停止进度动画
+        if hasattr(self, 'progress_animation'):
+            self.progress_animation.stop()
+            
         self.progress_bar.setVisible(False)
         self.extract_button.setEnabled(True)
         self.extract_button.setText("开始解压")
         self.cancel_button.setText("取消")
         
+        # 恢复窗口标题
+        self.setWindowTitle("解压压缩包")
+        
         if success:
+            # 完成时显示 100% 进度
+            self.progress_bar.setValue(100)
             QMessageBox.information(self, "成功", message)
             self.accept()
         else:
+            # 失败时重置进度条
+            self.progress_bar.setValue(0)
             QMessageBox.critical(self, "错误", message)
             
         # 清理工作线程
