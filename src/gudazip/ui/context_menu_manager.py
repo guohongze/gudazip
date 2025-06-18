@@ -86,6 +86,12 @@ class ContextMenuManager(QObject):
                 extract_action.triggered.connect(lambda: parent.extract_archive_file(file_path))
                 menu.addAction(extract_action)
                 
+                # 属性（压缩包内文件信息）
+                properties_action = QAction("属性", parent)
+                properties_action.setIcon(qta.icon('fa5s.info-circle', color='#2196f3'))
+                properties_action.triggered.connect(lambda: parent.show_archive_file_properties(file_path, item_name))
+                menu.addAction(properties_action)
+                
                 # 打开当前文件夹
                 open_folder_action = QAction("打开当前文件夹", parent)
                 open_folder_action.setIcon(qta.icon('fa5s.external-link-alt', color='#2196f3'))
@@ -126,6 +132,14 @@ class ContextMenuManager(QObject):
                 new_folder_action.setIcon(qta.icon('fa5s.folder', color='#4caf50'))
                 new_folder_action.triggered.connect(lambda: parent.create_archive_folder(file_path))
                 menu.addAction(new_folder_action)
+                
+                menu.addSeparator()
+                
+                # 属性（压缩包内文件夹信息）
+                properties_action = QAction("属性", parent)
+                properties_action.setIcon(qta.icon('fa5s.info-circle', color='#2196f3'))
+                properties_action.triggered.connect(lambda: parent.show_archive_file_properties(file_path, item_name))
+                menu.addAction(properties_action)
                 
                 # 打开当前文件夹
                 open_folder_action = QAction("打开当前文件夹", parent)
@@ -244,6 +258,15 @@ class ContextMenuManager(QObject):
             delete_action.setIcon(qta.icon('fa5s.trash', color='#f44336'))
             delete_action.triggered.connect(lambda: parent.delete_files(selected_paths))
             menu.addAction(delete_action)
+            
+            menu.addSeparator()
+            
+            # 属性菜单项（只在单选时显示）
+            if not is_multiple:
+                properties_action = QAction("属性", parent)
+                properties_action.setIcon(qta.icon('fa5s.info-circle', color='#2196f3'))
+                properties_action.triggered.connect(lambda: parent.show_properties(file_path))
+                menu.addAction(properties_action)
             
             # 只在单选文件夹时显示新建选项
             if not is_multiple and is_dir:

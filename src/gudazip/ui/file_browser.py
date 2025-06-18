@@ -1222,3 +1222,127 @@ class FileBrowser(QWidget):
                 category=ErrorCategory.APP_INTERNAL,
                 show_dialog=False
             )
+
+    def show_properties(self, file_path):
+        """显示文件属性"""
+        if not file_path or not os.path.exists(file_path):
+            QMessageBox.warning(self, "错误", "文件不存在或路径无效")
+            return
+            
+        if sys.platform == "win32":
+            # 转换为Windows格式路径
+            win_path = os.path.normpath(file_path)
+            
+            # 方法1: 使用win32com.client模块打开文件属性对话框
+            if HAS_WIN32:
+                try:
+                    shell = win32com.client.Dispatch("Shell.Application")
+                    folder = shell.NameSpace(os.path.dirname(win_path))
+                    item = folder.ParseName(os.path.basename(win_path))
+                    if item:
+                        item.InvokeVerb("properties")
+                        return  # 成功后直接返回
+                except Exception as e:
+                    print(f"win32com方法失败: {e}")
+            
+            # 方法2: 使用ctypes调用Shell32.dll
+            try:
+                if self._show_properties_fallback(win_path):
+                    return  # 成功后直接返回
+            except Exception as e:
+                print(f"ctypes方法失败: {e}")
+            
+            # 方法3: 最后的备用方案 - 打开文件位置
+            try:
+                self._open_file_location(win_path)
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"无法显示文件属性或打开文件位置：{str(e)}")
+        else:
+            QMessageBox.information(self, "提示", f"当前系统 ({sys.platform}) 不支持显示Windows文件属性")
+    
+    def _show_properties_fallback(self, file_path):
+        """显示文件属性的备用方法"""
+        try:
+            # 使用shell32.dll的SHObjectProperties函数
+            shell32 = ctypes.windll.shell32
+            SHObjectProperties = shell32.SHObjectProperties
+            
+            # 定义函数原型
+            SHObjectProperties.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.DWORD, ctypes.wintypes.LPCWSTR, ctypes.wintypes.LPCWSTR]
+            SHObjectProperties.restype = ctypes.wintypes.BOOL
+            
+            # 调用函数显示属性对话框
+            # SHOP_FILEPATH = 0x2  # 表示路径是文件路径
+            result = SHObjectProperties(0, 0x2, file_path, None)
+            return bool(result)
+                
+        except Exception as e:
+            print(f"备用方法失败: {e}")
+            return False
+    
+    def _open_file_location(self, file_path):
+        """在资源管理器中打开文件位置"""
+        try:
+            # 确保路径使用反斜杠
+            win_path = os.path.normpath(file_path)
+            
+            # 方法1: 尝试使用shell=True的explorer命令
+            try:
+                subprocess.run(f'explorer /select,"{win_path}"', shell=True, check=True, timeout=5)
+                return
+            except Exception:
+                pass  # 继续尝试下一种方法
+            
+            # 方法2: 使用os.startfile打开文件所在文件夹
+            folder_path = os.path.dirname(win_path)
+            os.startfile(folder_path)
+            
+        except Exception as e:
+            raise Exception(f"无法打开文件位置: {e}")
+
+    def show_archive_file_properties(self, file_path, file_name):
+        """显示压缩包内文件的属性信息"""
+        try:
+            # 获取压缩包管理器
+            from ..core.archive_manager import get_archive_manager
+            archive_manager = get_archive_manager()
+            
+            # 获取文件信息
+            file_info = None
+            if hasattr(self, 'archive_file_list') and self.archive_file_list:
+                for item in self.archive_file_list:
+                    if item.get('path') == file_path or item.get('name') == file_name:
+                        file_info = item
+                        break
+            
+            if not file_info:
+                QMessageBox.information(self, "属性", f"文件名: {file_name}\n路径: {file_path}\n\n无法获取详细信息")
+                return
+            
+            # 构建属性信息
+            info_text = f"文件名: {file_name}\n"
+            info_text += f"路径: {file_path}\n"
+            info_text += f"类型: {'文件夹' if file_info.get('is_dir', False) else '文件'}\n"
+            
+            if not file_info.get('is_dir', False):
+                # 文件信息
+                size = file_info.get('size', 0)
+                compressed_size = file_info.get('compressed_size', 0)
+                info_text += f"大小: {self.format_file_size(size)}\n"
+                info_text += f"压缩后大小: {self.format_file_size(compressed_size)}\n"
+                
+                if size > 0 and compressed_size > 0:
+                    compression_ratio = (1 - compressed_size / size) * 100
+                    info_text += f"压缩率: {compression_ratio:.1f}%\n"
+            
+            modified_time = file_info.get('modified_time', '')
+            if modified_time:
+                info_text += f"修改时间: {modified_time}\n"
+            
+            # 压缩包信息
+            info_text += f"\n压缩包: {os.path.basename(self.current_archive_path)}"
+            
+            QMessageBox.information(self, "文件属性", info_text)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"无法获取文件属性信息：{str(e)}")
