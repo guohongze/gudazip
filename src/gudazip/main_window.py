@@ -21,6 +21,7 @@ from .ui.file_browser import FileBrowser
 from .ui.create_archive_dialog import CreateArchiveDialog
 from .ui.extract_archive_dialog import ExtractArchiveDialog
 from .ui.settings_dialog import SettingsDialog
+from .ui.help_dialog import HelpDialog
 from .core.archive_manager import ArchiveManager
 from .core.error_manager import ErrorManager, ErrorCategory, ErrorSeverity, get_error_manager
 from .core.state_manager import StateManager, StateScope, StatePersistenceType, get_state_manager
@@ -91,13 +92,6 @@ class MainWindow(QMainWindow):
             
             # 设置窗口透明度
             self.setWindowOpacity(appearance_config['window_opacity'])
-            
-            # 应用主题（这里可以扩展支持不同主题）
-            theme = appearance_config['theme']
-            if theme == 'dark':
-                self.apply_dark_theme()
-            else:
-                self.apply_light_theme()
                 
         except Exception as e:
             self.error_manager.handle_exception(
@@ -106,45 +100,6 @@ class MainWindow(QMainWindow):
                 category=ErrorCategory.APP_CONFIGURATION,
                 show_dialog=False
             )
-    
-    def apply_light_theme(self):
-        """应用浅色主题"""
-        self.setStyleSheet("""
-        QMainWindow {
-            background-color: #ffffff;
-            color: #000000;
-        }
-        QMenuBar {
-            background-color: #f8f9fa;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        QStatusBar {
-            background-color: #f8f9fa;
-            border-top: 1px solid #e0e0e0;
-        }
-        """)
-    
-    def apply_dark_theme(self):
-        """应用深色主题"""
-        self.setStyleSheet("""
-        QMainWindow {
-            background-color: #2b2b2b;
-            color: #ffffff;
-        }
-        QMenuBar {
-            background-color: #3c3c3c;
-            color: #ffffff;
-            border-bottom: 1px solid #555555;
-        }
-        QMenuBar::item:selected {
-            background-color: #555555;
-        }
-        QStatusBar {
-            background-color: #3c3c3c;
-            color: #ffffff;
-            border-top: 1px solid #555555;
-        }
-        """)
     
     def on_config_changed(self, key: str, old_value, new_value):
         """处理配置变更"""
@@ -211,36 +166,15 @@ class MainWindow(QMainWindow):
         self.action_settings.triggered.connect(self.show_settings)
         
         # 关于
-        self.action_about = QAction("关于", self)
-        self.action_about.setIcon(qta.icon('fa5s.info-circle', color='#1976d2'))
-        self.action_about.triggered.connect(self.show_about)
+        self.action_about = QAction("帮助", self)
+        self.action_about.setIcon(qta.icon('fa5s.question-circle', color='#1976d2'))
+        self.action_about.triggered.connect(self.show_help)
         
     def setup_menus(self):
         """设置菜单栏"""
-        menubar = self.menuBar()
-        
-        # 文件菜单
-        file_menu = menubar.addMenu("文件")
-        file_menu.addAction(self.action_open_archive)
-        file_menu.addAction(self.action_back_to_filesystem)
-        file_menu.addSeparator()
-        file_menu.addAction(self.action_new_archive)
-        file_menu.addAction(self.action_extract)
-        file_menu.addSeparator()
-        file_menu.addAction("退出", self.close)
-        
-        # 视图菜单
-        view_menu = menubar.addMenu("视图")
-        view_menu.addAction(self.action_refresh)
-        
-        # 工具菜单
-        tools_menu = menubar.addMenu("工具")
-        tools_menu.addAction(self.action_settings)
-        
-        # 帮助菜单
-        help_menu = menubar.addMenu("帮助")
-        help_menu.addAction(self.action_about)
-        
+        # 隐藏菜单栏，不需要任何菜单
+        self.menuBar().hide()
+    
     def setup_toolbar(self):
         """设置工具栏"""
         toolbar = self.addToolBar("主工具栏")
@@ -285,6 +219,10 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.action_extract)
         toolbar.addSeparator()
         toolbar.addAction(self.action_open_archive)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_settings)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_about)
         toolbar.addSeparator()
         toolbar.addAction(self.action_back_to_filesystem)
         
@@ -595,12 +533,10 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self)
         dialog.exec()
         
-    def show_about(self):
-        """显示关于对话框"""
-        QMessageBox.about(self, "关于 GudaZip", 
-                         "GudaZip v0.1.0\n"
-                         "Python桌面压缩管理器\n"
-                         "基于PySide6开发") 
+    def show_help(self):
+        """显示帮助对话框"""
+        dialog = HelpDialog(self)
+        dialog.exec()
 
     def set_window_icon(self):
         """设置窗口图标"""

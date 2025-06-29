@@ -8,12 +8,15 @@ from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, 
     QLabel, QPushButton, QLineEdit, QComboBox, QSpinBox, 
     QCheckBox, QSlider, QGroupBox, QFormLayout, QMessageBox,
-    QFileDialog, QDialogButtonBox
+    QFileDialog, QDialogButtonBox, QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
+import os
+import sys
 
 from ..core.config_manager import ConfigManager, get_config_manager
+from ..core.file_association_manager import FileAssociationManager
 
 
 class SettingsDialog(QDialog):
@@ -23,20 +26,21 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.parent_window = parent
         self.config_manager = get_config_manager(self)
+        self.file_association_manager = FileAssociationManager()
         self.init_ui()
         self.connect_signals()
         self.load_current_settings()
         
     def init_ui(self):
         """初始化界面"""
-        self.setWindowTitle("GudaZip 设置")
+        self.setWindowTitle("选项")
         self.setMinimumSize(500, 400)
         self.resize(600, 500)
         
         layout = QVBoxLayout(self)
         
         # 标题
-        title = QLabel("程序设置")
+        title = QLabel("程序选项")
         title.setAlignment(Qt.AlignCenter)
         title.setFont(QFont("微软雅黑", 12, QFont.Bold))
         layout.addWidget(title)
@@ -50,6 +54,7 @@ class SettingsDialog(QDialog):
         self.create_appearance_tab()
         self.create_behavior_tab()
         self.create_window_tab()
+        self.create_file_association_tab()
         
         # 对话框按钮
         self.create_dialog_buttons(layout)
@@ -58,11 +63,6 @@ class SettingsDialog(QDialog):
         """创建常规设置页"""
         tab = QWidget()
         layout = QFormLayout(tab)
-        
-        # 语言设置
-        self.language_combo = QComboBox()
-        self.language_combo.addItems(["中文 (zh_CN)", "English (en_US)"])
-        layout.addRow("界面语言:", self.language_combo)
         
         # 启动路径
         self.startup_path_combo = QComboBox()
@@ -76,17 +76,9 @@ class SettingsDialog(QDialog):
             self.startup_path_combo.addItem(text, value)
         layout.addRow("启动路径:", self.startup_path_combo)
         
-        # 自动检查更新
-        self.check_updates_cb = QCheckBox()
-        layout.addRow("自动检查更新:", self.check_updates_cb)
-        
         # 删除确认
         self.confirm_delete_cb = QCheckBox()
         layout.addRow("删除时确认:", self.confirm_delete_cb)
-        
-        # 自动备份
-        self.auto_backup_cb = QCheckBox()
-        layout.addRow("自动备份:", self.auto_backup_cb)
         
         self.tab_widget.addTab(tab, "常规")
         
@@ -94,18 +86,6 @@ class SettingsDialog(QDialog):
         """创建外观设置页"""
         tab = QWidget()
         layout = QFormLayout(tab)
-        
-        # 主题
-        self.theme_combo = QComboBox()
-        theme_items = [
-            ("浅色主题", "light"),
-            ("深色主题", "dark"),
-            ("跟随系统", "auto"),
-            ("自定义", "custom")
-        ]
-        for text, value in theme_items:
-            self.theme_combo.addItem(text, value)
-        layout.addRow("界面主题:", self.theme_combo)
         
         # 字体
         self.font_family_edit = QLineEdit()
@@ -127,19 +107,6 @@ class SettingsDialog(QDialog):
         opacity_widget = QWidget()
         opacity_widget.setLayout(opacity_layout)
         layout.addRow("窗口透明度:", opacity_widget)
-        
-        # 显示工具栏
-        self.show_toolbar_cb = QCheckBox()
-        layout.addRow("显示工具栏:", self.show_toolbar_cb)
-        
-        # 显示状态栏
-        self.show_statusbar_cb = QCheckBox()
-        layout.addRow("显示状态栏:", self.show_statusbar_cb)
-        
-        # 图标大小
-        self.icon_size_combo = QComboBox()
-        self.icon_size_combo.addItems(["16px", "24px", "32px"])
-        layout.addRow("图标大小:", self.icon_size_combo)
         
         self.tab_widget.addTab(tab, "外观")
         
@@ -215,6 +182,97 @@ class SettingsDialog(QDialog):
         
         self.tab_widget.addTab(tab, "窗口")
         
+    def create_file_association_tab(self):
+        """创建文件关联设置页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # 说明文字
+        info_label = QLabel("选择要关联到 GudaZip 的文件类型：")
+        info_label.setFont(QFont("微软雅黑", 9, QFont.Bold))
+        layout.addWidget(info_label)
+        
+        # 文件类型列表
+        self.file_types_list = QListWidget()
+        self.file_types_list.setMaximumHeight(200)
+        
+        # 支持的文件类型
+        self.supported_types = [
+            ('.zip', 'ZIP 压缩文件'),
+            ('.7z', '7-Zip 压缩文件'),
+            ('.rar', 'RAR 压缩文件'),
+            ('.tar', 'TAR 归档文件'),
+            ('.gz', 'GZIP 压缩文件'),
+            ('.bz2', 'BZIP2 压缩文件'),
+            ('.tar.gz', 'TAR.GZ 压缩文件'),
+            ('.tar.bz2', 'TAR.BZ2 压缩文件')
+        ]
+        
+        # 添加文件类型到列表
+        for ext, desc in self.supported_types:
+            item = QListWidgetItem(f"{ext} - {desc}")
+            item.setCheckState(Qt.Unchecked)
+            item.setData(Qt.UserRole, ext)  # 存储扩展名
+            self.file_types_list.addItem(item)
+        
+        layout.addWidget(self.file_types_list)
+        
+        # 操作按钮
+        button_layout = QHBoxLayout()
+        
+        self.select_all_btn = QPushButton("全选")
+        self.select_all_btn.clicked.connect(self.select_all_file_types)
+        button_layout.addWidget(self.select_all_btn)
+        
+        self.deselect_all_btn = QPushButton("反选")
+        self.deselect_all_btn.clicked.connect(self.deselect_all_file_types)
+        button_layout.addWidget(self.deselect_all_btn)
+        
+        self.clear_all_btn = QPushButton("清除")
+        self.clear_all_btn.clicked.connect(self.clear_all_file_types)
+        button_layout.addWidget(self.clear_all_btn)
+        
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        # 默认程序设置
+        default_group = QGroupBox("默认程序设置")
+        default_layout = QVBoxLayout(default_group)
+        
+        self.set_as_default_cb = QCheckBox("将 GudaZip 设置为默认压缩程序")
+        default_layout.addWidget(self.set_as_default_cb)
+        
+        # 警告提示
+        warning_label = QLabel("⚠️ 修改文件关联需要管理员权限，某些操作可能需要重启资源管理器。")
+        warning_label.setStyleSheet("color: #ff6600; font-size: 9pt;")
+        warning_label.setWordWrap(True)
+        default_layout.addWidget(warning_label)
+        
+        layout.addWidget(default_group)
+        
+        layout.addStretch()
+        self.tab_widget.addTab(tab, "文件关联")
+        
+    def select_all_file_types(self):
+        """全选文件类型"""
+        for i in range(self.file_types_list.count()):
+            item = self.file_types_list.item(i)
+            item.setCheckState(Qt.Checked)
+            
+    def deselect_all_file_types(self):
+        """反选文件类型"""
+        for i in range(self.file_types_list.count()):
+            item = self.file_types_list.item(i)
+            current_state = item.checkState()
+            new_state = Qt.Unchecked if current_state == Qt.Checked else Qt.Checked
+            item.setCheckState(new_state)
+            
+    def clear_all_file_types(self):
+        """清除所有选择"""
+        for i in range(self.file_types_list.count()):
+            item = self.file_types_list.item(i)
+            item.setCheckState(Qt.Unchecked)
+        
     def create_dialog_buttons(self, layout):
         """创建对话框按钮"""
         button_box = QDialogButtonBox()
@@ -248,35 +306,17 @@ class SettingsDialog(QDialog):
         """加载当前设置"""
         try:
             # 常规设置
-            language = self.config_manager.get_config('general.language', 'zh_CN')
-            if language == 'zh_CN':
-                self.language_combo.setCurrentIndex(0)
-            else:
-                self.language_combo.setCurrentIndex(1)
-                
             startup_path = self.config_manager.get_config('general.startup_path', 'desktop')
             for i in range(self.startup_path_combo.count()):
                 if self.startup_path_combo.itemData(i) == startup_path:
                     self.startup_path_combo.setCurrentIndex(i)
                     break
                     
-            self.check_updates_cb.setChecked(
-                self.config_manager.get_config('general.check_updates', True)
-            )
             self.confirm_delete_cb.setChecked(
                 self.config_manager.get_config('general.confirm_delete', True)
             )
-            self.auto_backup_cb.setChecked(
-                self.config_manager.get_config('general.auto_backup', True)
-            )
             
             # 外观设置
-            theme = self.config_manager.get_config('appearance.theme', 'light')
-            for i in range(self.theme_combo.count()):
-                if self.theme_combo.itemData(i) == theme:
-                    self.theme_combo.setCurrentIndex(i)
-                    break
-                    
             self.font_family_edit.setText(
                 self.config_manager.get_config('appearance.font_family', '微软雅黑')
             )
@@ -288,16 +328,6 @@ class SettingsDialog(QDialog):
             )
             self.opacity_slider.setValue(opacity_value)
             self.opacity_label.setText(f"{opacity_value}%")
-            
-            self.show_toolbar_cb.setChecked(
-                self.config_manager.get_config('appearance.show_toolbar', True)
-            )
-            self.show_statusbar_cb.setChecked(
-                self.config_manager.get_config('appearance.show_statusbar', True)
-            )
-            
-            icon_size = self.config_manager.get_config('appearance.icon_size', 16)
-            self.icon_size_combo.setCurrentText(f"{icon_size}px")
             
             # 行为设置
             double_click = self.config_manager.get_config('behavior.double_click_action', 'open')
@@ -339,6 +369,29 @@ class SettingsDialog(QDialog):
                 self.config_manager.get_config('window.default_height', 800)
             )
             
+            # 文件关联设置
+            associated_types = self.config_manager.get_config('file_association.associated_types', [])
+            
+            # 检查当前系统中的文件关联状态
+            all_extensions = [ext for ext, _ in self.supported_types]
+            current_associations = self.file_association_manager.check_association_status(all_extensions)
+            
+            for i in range(self.file_types_list.count()):
+                item = self.file_types_list.item(i)
+                ext = item.data(Qt.UserRole)
+                
+                # 优先显示系统实际关联状态，其次是配置文件中的状态
+                if current_associations.get(ext, False):
+                    item.setCheckState(Qt.Checked)
+                elif ext in associated_types:
+                    item.setCheckState(Qt.Checked)
+                else:
+                    item.setCheckState(Qt.Unchecked)
+            
+            self.set_as_default_cb.setChecked(
+                self.config_manager.get_config('file_association.set_as_default', False)
+            )
+            
         except Exception as e:
             QMessageBox.warning(self, "警告", f"加载设置时出错：{e}")
     
@@ -346,28 +399,15 @@ class SettingsDialog(QDialog):
         """应用设置"""
         try:
             # 常规设置
-            language = "zh_CN" if self.language_combo.currentIndex() == 0 else "en_US"
-            self.config_manager.set_config('general.language', language)
-            
             startup_path = self.startup_path_combo.currentData()
             self.config_manager.set_config('general.startup_path', startup_path)
             
-            self.config_manager.set_config('general.check_updates', self.check_updates_cb.isChecked())
             self.config_manager.set_config('general.confirm_delete', self.confirm_delete_cb.isChecked())
-            self.config_manager.set_config('general.auto_backup', self.auto_backup_cb.isChecked())
             
             # 外观设置
-            theme = self.theme_combo.currentData()
-            self.config_manager.set_config('appearance.theme', theme)
-            
             self.config_manager.set_config('appearance.font_family', self.font_family_edit.text())
             self.config_manager.set_config('appearance.font_size', self.font_size_spin.value())
             self.config_manager.set_config('appearance.window_opacity', self.opacity_slider.value() / 100.0)
-            self.config_manager.set_config('appearance.show_toolbar', self.show_toolbar_cb.isChecked())
-            self.config_manager.set_config('appearance.show_statusbar', self.show_statusbar_cb.isChecked())
-            
-            icon_size = int(self.icon_size_combo.currentText().replace('px', ''))
-            self.config_manager.set_config('appearance.icon_size', icon_size)
             
             # 行为设置
             double_click = self.double_click_combo.currentData()
@@ -386,18 +426,90 @@ class SettingsDialog(QDialog):
             self.config_manager.set_config('window.default_width', self.default_width_spin.value())
             self.config_manager.set_config('window.default_height', self.default_height_spin.value())
             
+            # 文件关联设置
+            associated_types = []
+            for i in range(self.file_types_list.count()):
+                item = self.file_types_list.item(i)
+                if item.checkState() == Qt.Checked:
+                    ext = item.data(Qt.UserRole)
+                    associated_types.append(ext)
+            
+            self.config_manager.set_config('file_association.associated_types', associated_types)
+            self.config_manager.set_config('file_association.set_as_default', self.set_as_default_cb.isChecked())
+            
             # 保存配置
             self.config_manager.save_configs()
             
-            QMessageBox.information(self, "成功", "设置已保存")
+            # 处理文件关联（静默）
+            if associated_types:
+                self.file_association_manager.register_file_association(
+                    associated_types, 
+                    self.set_as_default_cb.isChecked()
+                )
+            
+            # 关闭对话框（不显示提示消息）
+            self.accept()
             
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存设置失败：{e}")
     
     def accept_settings(self):
         """确定并关闭"""
-        self.apply_settings()
-        self.accept()
+        try:
+            # 应用设置但不显示提示消息
+            startup_path = self.startup_path_combo.currentData()
+            self.config_manager.set_config('general.startup_path', startup_path)
+            
+            self.config_manager.set_config('general.confirm_delete', self.confirm_delete_cb.isChecked())
+            
+            # 外观设置
+            self.config_manager.set_config('appearance.font_family', self.font_family_edit.text())
+            self.config_manager.set_config('appearance.font_size', self.font_size_spin.value())
+            self.config_manager.set_config('appearance.window_opacity', self.opacity_slider.value() / 100.0)
+            
+            # 行为设置
+            double_click = self.double_click_combo.currentData()
+            self.config_manager.set_config('behavior.double_click_action', double_click)
+            
+            self.config_manager.set_config('behavior.show_hidden_files', self.show_hidden_cb.isChecked())
+            self.config_manager.set_config('behavior.auto_refresh', self.auto_refresh_cb.isChecked())
+            self.config_manager.set_config('behavior.file_view_mode', self.view_mode_combo.currentText())
+            self.config_manager.set_config('behavior.sort_column', self.sort_column_spin.value())
+            self.config_manager.set_config('behavior.sort_order', self.sort_order_combo.currentIndex())
+            
+            # 窗口设置
+            self.config_manager.set_config('window.remember_size', self.remember_size_cb.isChecked())
+            self.config_manager.set_config('window.remember_position', self.remember_position_cb.isChecked())
+            self.config_manager.set_config('window.center_on_startup', self.center_startup_cb.isChecked())
+            self.config_manager.set_config('window.default_width', self.default_width_spin.value())
+            self.config_manager.set_config('window.default_height', self.default_height_spin.value())
+            
+            # 文件关联设置
+            associated_types = []
+            for i in range(self.file_types_list.count()):
+                item = self.file_types_list.item(i)
+                if item.checkState() == Qt.Checked:
+                    ext = item.data(Qt.UserRole)
+                    associated_types.append(ext)
+            
+            self.config_manager.set_config('file_association.associated_types', associated_types)
+            self.config_manager.set_config('file_association.set_as_default', self.set_as_default_cb.isChecked())
+            
+            # 保存配置
+            self.config_manager.save_configs()
+            
+            # 处理文件关联（静默）
+            if associated_types:
+                self.file_association_manager.register_file_association(
+                    associated_types, 
+                    self.set_as_default_cb.isChecked()
+                )
+            
+            # 关闭对话框（不显示提示消息）
+            self.accept()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存设置失败：{e}")
     
     def reset_settings(self):
         """重置设置"""
