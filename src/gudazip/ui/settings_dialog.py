@@ -34,8 +34,8 @@ class SettingsDialog(QDialog):
     def init_ui(self):
         """初始化界面"""
         self.setWindowTitle("选项")
-        self.setMinimumSize(500, 400)
-        self.resize(600, 500)
+        self.setMinimumSize(580, 650)  # 增大最小尺寸，确保所有内容正常显示
+        self.resize(680, 750)
         
         layout = QVBoxLayout(self)
         
@@ -50,20 +50,22 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.tab_widget)
         
         # 创建各个设置页
-        self.create_general_tab()
-        self.create_appearance_tab()
-        self.create_behavior_tab()
-        self.create_window_tab()
+        self.create_general_settings_tab()
         self.create_file_association_tab()
         self.create_context_menu_tab()
         
         # 对话框按钮
         self.create_dialog_buttons(layout)
         
-    def create_general_tab(self):
-        """创建常规设置页"""
+    def create_general_settings_tab(self):
+        """创建通用设置页"""
         tab = QWidget()
-        layout = QFormLayout(tab)
+        main_layout = QVBoxLayout(tab)
+        
+        # 常规设置组
+        general_group = QGroupBox("常规设置")
+        general_group.setMinimumHeight(80)  # 设置最小高度
+        general_layout = QFormLayout(general_group)
         
         # 启动路径
         self.startup_path_combo = QComboBox()
@@ -75,28 +77,28 @@ class SettingsDialog(QDialog):
         ]
         for text, value in startup_items:
             self.startup_path_combo.addItem(text, value)
-        layout.addRow("启动路径:", self.startup_path_combo)
+        general_layout.addRow("启动路径:", self.startup_path_combo)
         
         # 删除确认
         self.confirm_delete_cb = QCheckBox()
-        layout.addRow("删除时确认:", self.confirm_delete_cb)
+        general_layout.addRow("删除时确认:", self.confirm_delete_cb)
         
-        self.tab_widget.addTab(tab, "常规")
+        main_layout.addWidget(general_group)
         
-    def create_appearance_tab(self):
-        """创建外观设置页"""
-        tab = QWidget()
-        layout = QFormLayout(tab)
+        # 外观设置组
+        appearance_group = QGroupBox("外观设置")
+        appearance_group.setMinimumHeight(120)  # 设置最小高度
+        appearance_layout = QFormLayout(appearance_group)
         
         # 字体
         self.font_family_edit = QLineEdit()
-        layout.addRow("字体:", self.font_family_edit)
+        appearance_layout.addRow("字体:", self.font_family_edit)
         
         # 字体大小
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(8, 20)
         self.font_size_spin.setSuffix(" pt")
-        layout.addRow("字体大小:", self.font_size_spin)
+        appearance_layout.addRow("字体大小:", self.font_size_spin)
         
         # 窗口透明度
         self.opacity_slider = QSlider(Qt.Horizontal)
@@ -107,14 +109,14 @@ class SettingsDialog(QDialog):
         opacity_layout.addWidget(self.opacity_label)
         opacity_widget = QWidget()
         opacity_widget.setLayout(opacity_layout)
-        layout.addRow("窗口透明度:", opacity_widget)
+        appearance_layout.addRow("窗口透明度:", opacity_widget)
         
-        self.tab_widget.addTab(tab, "外观")
+        main_layout.addWidget(appearance_group)
         
-    def create_behavior_tab(self):
-        """创建行为设置页"""
-        tab = QWidget()
-        layout = QFormLayout(tab)
+        # 行为设置组
+        behavior_group = QGroupBox("行为设置")
+        behavior_group.setMinimumHeight(180)  # 设置最小高度，避免内容被压缩
+        behavior_layout = QFormLayout(behavior_group)
         
         # 双击操作
         self.double_click_combo = QComboBox()
@@ -125,63 +127,68 @@ class SettingsDialog(QDialog):
         ]
         for text, value in double_click_items:
             self.double_click_combo.addItem(text, value)
-        layout.addRow("双击操作:", self.double_click_combo)
+        behavior_layout.addRow("双击操作:", self.double_click_combo)
         
         # 显示隐藏文件
         self.show_hidden_cb = QCheckBox()
-        layout.addRow("显示隐藏文件:", self.show_hidden_cb)
+        behavior_layout.addRow("显示隐藏文件:", self.show_hidden_cb)
         
         # 自动刷新
         self.auto_refresh_cb = QCheckBox()
-        layout.addRow("自动刷新:", self.auto_refresh_cb)
+        behavior_layout.addRow("自动刷新:", self.auto_refresh_cb)
         
         # 文件视图模式
         self.view_mode_combo = QComboBox()
         self.view_mode_combo.addItems(["详细信息", "图标"])
-        layout.addRow("默认视图模式:", self.view_mode_combo)
+        behavior_layout.addRow("默认视图模式:", self.view_mode_combo)
         
         # 排序列
         self.sort_column_spin = QSpinBox()
         self.sort_column_spin.setRange(0, 3)
-        layout.addRow("默认排序列:", self.sort_column_spin)
+        behavior_layout.addRow("默认排序列:", self.sort_column_spin)
         
         # 排序顺序
         self.sort_order_combo = QComboBox()
         self.sort_order_combo.addItems(["升序", "降序"])
-        layout.addRow("排序顺序:", self.sort_order_combo)
+        behavior_layout.addRow("排序顺序:", self.sort_order_combo)
         
-        self.tab_widget.addTab(tab, "行为")
+        main_layout.addWidget(behavior_group)
         
-    def create_window_tab(self):
-        """创建窗口设置页"""
-        tab = QWidget()
-        layout = QFormLayout(tab)
+        # 窗口设置组
+        window_group = QGroupBox("窗口设置")
+        window_group.setMinimumHeight(160)  # 设置最小高度
+        window_layout = QFormLayout(window_group)
         
         # 记住窗口大小
         self.remember_size_cb = QCheckBox()
-        layout.addRow("记住窗口大小:", self.remember_size_cb)
+        window_layout.addRow("记住窗口大小:", self.remember_size_cb)
         
         # 记住窗口位置
         self.remember_position_cb = QCheckBox()
-        layout.addRow("记住窗口位置:", self.remember_position_cb)
+        window_layout.addRow("记住窗口位置:", self.remember_position_cb)
         
         # 启动时居中
         self.center_startup_cb = QCheckBox()
-        layout.addRow("启动时居中:", self.center_startup_cb)
+        window_layout.addRow("启动时居中:", self.center_startup_cb)
         
         # 默认宽度
         self.default_width_spin = QSpinBox()
         self.default_width_spin.setRange(800, 2000)
         self.default_width_spin.setSuffix(" px")
-        layout.addRow("默认宽度:", self.default_width_spin)
+        window_layout.addRow("默认宽度:", self.default_width_spin)
         
         # 默认高度
         self.default_height_spin = QSpinBox()
         self.default_height_spin.setRange(600, 1500)
         self.default_height_spin.setSuffix(" px")
-        layout.addRow("默认高度:", self.default_height_spin)
+        window_layout.addRow("默认高度:", self.default_height_spin)
         
-        self.tab_widget.addTab(tab, "窗口")
+        main_layout.addWidget(window_group)
+        
+        # 添加弹性空间
+        main_layout.addStretch()
+        
+        self.tab_widget.addTab(tab, "通用设置")
         
     def create_file_association_tab(self):
         """创建文件关联设置页"""
@@ -211,7 +218,7 @@ class SettingsDialog(QDialog):
         
         # 添加文件类型到列表
         for ext, desc in self.supported_types:
-            item = QListWidgetItem(f"{ext} - {desc}")
+            item = QListWidgetItem(ext)  # 只显示扩展名
             item.setCheckState(Qt.Unchecked)
             item.setData(Qt.UserRole, ext)  # 存储扩展名
             self.file_types_list.addItem(item)
