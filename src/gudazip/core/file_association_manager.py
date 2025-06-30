@@ -263,21 +263,21 @@ class FileAssociationManager:
             # 创建子菜单容器
             submenu_shell_key = f"{main_menu_key}\\shell"
             
-            # 创建各个子菜单项
-            if menu_options.get('add', False):
-                self._create_submenu_item(submenu_shell_key, "add", "添加到压缩包", app_path, "--add")
-            
-            if menu_options.get('extract', False):
-                self._create_submenu_item(submenu_shell_key, "extract", "解压到此处", app_path, "--extract-here")
-            
-            if menu_options.get('open', False):
-                self._create_submenu_item(submenu_shell_key, "open", "用GudaZip打开", app_path, "--open")
+            # 创建各个子菜单项（使用数字前缀控制显示顺序）
+            if menu_options.get('7z', False):
+                self._create_submenu_item(submenu_shell_key, "1_7z", "创建同名7Z压缩包", app_path, "--compress-7z")
             
             if menu_options.get('zip', False):
-                self._create_submenu_item(submenu_shell_key, "zip", "创建同名ZIP压缩包", app_path, "--compress-zip")
+                self._create_submenu_item(submenu_shell_key, "2_zip", "创建同名ZIP压缩包", app_path, "--compress-zip")
             
-            if menu_options.get('7z', False):
-                self._create_submenu_item(submenu_shell_key, "7z", "创建同名7Z压缩包", app_path, "--compress-7z")
+            if menu_options.get('add', False):
+                self._create_submenu_item(submenu_shell_key, "3_add", "添加到压缩包", app_path, "--add")
+            
+            if menu_options.get('extract', False):
+                self._create_submenu_item(submenu_shell_key, "4_extract", "解压到此处", app_path, "--extract-here")
+            
+            if menu_options.get('open', False):
+                self._create_submenu_item(submenu_shell_key, "5_open", "用GudaZip打开", app_path, "--open")
                 
         except Exception as e:
             raise Exception(f"为 {target} 安装Shell菜单失败: {e}")
@@ -330,16 +330,21 @@ class FileAssociationManager:
                 except Exception as e:
                     print(f"删除 {target} 的GudaZip菜单失败: {e}")
                 
-                # 删除可能的单个菜单项
-                single_menu_items = ["GudaZip_Add", "GudaZip_Extract", "GudaZip_Open", "GudaZip_Zip", "GudaZip_7z"]
-                for item in single_menu_items:
+                # 删除可能的单个菜单项（包括旧版本和新版本的键名）
+                old_menu_items = ["GudaZip_Add", "GudaZip_Extract", "GudaZip_Open", "GudaZip_Zip", "GudaZip_7z"]
+                new_menu_items = ["1_7z", "2_zip", "3_add", "4_extract", "5_open"]
+                legacy_menu_items = ["add", "extract", "open", "zip", "7z"]  # 之前版本的键名
+                
+                all_menu_items = old_menu_items + new_menu_items + legacy_menu_items
+                
+                for item in all_menu_items:
                     try:
                         item_key = f"{target}\\shell\\{item}"
                         self._delete_registry_key_recursive(winreg.HKEY_CLASSES_ROOT, item_key)
                     except FileNotFoundError:
                         pass  # 键不存在，忽略
                     except Exception as e:
-                        print(f"删除 {target} 的{item}菜单失败: {e}")
+                        pass  # 忽略删除失败，避免过多输出
             
             # 刷新Shell关联
             self._refresh_shell_associations()
