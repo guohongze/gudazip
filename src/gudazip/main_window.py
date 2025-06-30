@@ -486,18 +486,42 @@ class MainWindow(QMainWindow):
         # 情况1和2：文件系统模式
         archive_file = None
         
+        # 首先检查是否有选中任何文件
+        if not selected_paths and not current_path:
+            # 没有选中任何文件
+            QMessageBox.information(self, "提示", "请选择压缩文件")
+            return
+        
         # 检查选中的文件中是否有压缩包
         if selected_paths:
+            has_valid_archive = False
+            has_invalid_files = False
+            
             for path in selected_paths:
-                if self.archive_manager.is_archive_file(path):
-                    archive_file = path
-                    break
+                if os.path.isfile(path):
+                    if self.archive_manager.is_archive_file(path):
+                        archive_file = path
+                        has_valid_archive = True
+                        break
+                    else:
+                        has_invalid_files = True
+            
+            # 如果选中了文件但都不是有效的压缩文件
+            if not has_valid_archive and has_invalid_files:
+                QMessageBox.warning(self, "提示", "请选择正确的压缩文件")
+                return
         
         # 如果没有选中压缩包，检查当前选中的单个文件
-        if not archive_file and current_path and self.archive_manager.is_archive_file(current_path):
-            archive_file = current_path
+        if not archive_file and current_path:
+            if os.path.isfile(current_path):
+                if self.archive_manager.is_archive_file(current_path):
+                    archive_file = current_path
+                else:
+                    # 当前选中的文件不是压缩文件
+                    QMessageBox.warning(self, "提示", "请选择正确的压缩文件")
+                    return
             
-        # 情况2：没有选中任何压缩包文件
+        # 如果仍然没有找到压缩文件，提示用户选择
         if not archive_file:
             # 使用文件对话框让用户选择压缩包
             archive_file, _ = QFileDialog.getOpenFileName(
