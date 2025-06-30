@@ -270,11 +270,11 @@ class SettingsDialog(QDialog):
         menu_options_layout = QVBoxLayout()
         menu_options_layout.setContentsMargins(20, 0, 0, 0)  # 添加左侧缩进
         
-        self.context_menu_add_cb = QCheckBox("添加到压缩包")
-        self.context_menu_extract_cb = QCheckBox("解压到此处")
-        self.context_menu_open_cb = QCheckBox("用GudaZip打开")
-        self.context_menu_zip_cb = QCheckBox("压缩到 {文件名}.zip")
-        self.context_menu_7z_cb = QCheckBox("压缩到 {文件名}.7z")
+        self.context_menu_add_cb = QCheckBox("添加到压缩包 (文件/文件夹)")
+        self.context_menu_extract_cb = QCheckBox("解压功能 (压缩文件)")
+        self.context_menu_open_cb = QCheckBox("打开压缩包 (压缩文件)")
+        self.context_menu_zip_cb = QCheckBox("压缩为ZIP (文件/文件夹)")
+        self.context_menu_7z_cb = QCheckBox("压缩为7Z (文件/文件夹)")
         
         menu_options_layout.addWidget(self.context_menu_add_cb)
         menu_options_layout.addWidget(self.context_menu_extract_cb)
@@ -467,7 +467,7 @@ class SettingsDialog(QDialog):
             )
             
             # 右键菜单设置
-            context_menu_installed = self.file_association_manager.check_context_menu_status()
+            context_menu_installed = self.file_association_manager.check_context_menu_status_simple()
             
             self.enable_context_menu_cb.setChecked(
                 context_menu_installed or self.config_manager.get_config('context_menu.enabled', False)
@@ -654,12 +654,45 @@ class SettingsDialog(QDialog):
                 '7z': self.context_menu_7z_cb.isChecked()
             }
             
-            success = self.file_association_manager.install_context_menu(menu_options)
-            if success:
-                QMessageBox.information(self, "成功", "右键菜单安装成功！\n可能需要重新登录或重启资源管理器才能生效。")
+            result = self.file_association_manager.install_context_menu(menu_options)
+            if result.get("success", False):
+                QMessageBox.information(self, "成功", 
+                    f"{result.get('message', '右键菜单安装成功！')}\n"
+                    "注意：新的安全右键菜单只针对压缩文件格式，"
+                    "不会影响系统对象如'我的电脑'、'网络'等。")
                 self.enable_context_menu_cb.setChecked(True)
             else:
-                QMessageBox.warning(self, "失败", "右键菜单安装失败，请检查是否有管理员权限。")
+                message = result.get('message', '右键菜单安装失败')
+                error_code = result.get('error', '')
+                
+                if error_code == 'INSUFFICIENT_PRIVILEGES':
+                    # 权限不足，提供重启为管理员的选项
+                    reply = QMessageBox.question(
+                        self, "需要管理员权限",
+                        f"{message}\n\n"
+                        "是否要以管理员身份重新启动程序？\n"
+                        "点击'是'将以管理员权限重启程序。",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes
+                    )
+                    
+                    if reply == QMessageBox.Yes:
+                        try:
+                            import ctypes
+                            import sys
+                            # 以管理员权限重启程序
+                            ctypes.windll.shell32.ShellExecuteW(
+                                None, "runas", sys.executable, 
+                                f'"{sys.argv[0]}"' if len(sys.argv) > 0 else "", 
+                                None, 1
+                            )
+                            # 关闭当前程序
+                            sys.exit(0)
+                        except Exception as e:
+                            QMessageBox.critical(self, "错误", f"无法以管理员权限启动：{e}")
+                else:
+                    QMessageBox.warning(self, "失败", f"{message}\n\n"
+                        "新版本使用安全的PyWin32接口，避免对系统造成影响。")
                 
         except Exception as e:
             QMessageBox.critical(self, "错误", f"安装右键菜单时发生错误：{str(e)}")
@@ -669,15 +702,17 @@ class SettingsDialog(QDialog):
         try:
             reply = QMessageBox.question(
                 self, "确认卸载",
-                "确定要卸载GudaZip右键菜单吗？",
+                "确定要卸载GudaZip右键菜单吗？\n"
+                "这将移除所有与GudaZip相关的右键菜单项。",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
             
             if reply == QMessageBox.Yes:
-                success = self.file_association_manager.uninstall_context_menu()
-                if success:
-                    QMessageBox.information(self, "成功", "右键菜单卸载成功！")
+                result = self.file_association_manager.uninstall_context_menu()
+                if result.get("success", False):
+                    QMessageBox.information(self, "成功", 
+                        f"{result.get('message', '右键菜单卸载成功！')}")
                     self.enable_context_menu_cb.setChecked(False)
                     # 清除所有选项
                     self.context_menu_add_cb.setChecked(False)
@@ -686,7 +721,8 @@ class SettingsDialog(QDialog):
                     self.context_menu_zip_cb.setChecked(False)
                     self.context_menu_7z_cb.setChecked(False)
                 else:
-                    QMessageBox.warning(self, "失败", "右键菜单卸载失败，请检查是否有管理员权限。")
+                    message = result.get('message', '右键菜单卸载失败')
+                    QMessageBox.warning(self, "失败", f"{message}")
                     
         except Exception as e:
             QMessageBox.critical(self, "错误", f"卸载右键菜单时发生错误：{str(e)}") 

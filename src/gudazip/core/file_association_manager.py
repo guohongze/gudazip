@@ -1,186 +1,204 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 文件关联管理器
-处理Windows系统的文件关联设置
+使用安全的PyWin32接口进行文件关联管理，避免直接操作注册表
 """
 
-import os
 import sys
+import os
 import subprocess
-from typing import List, Dict, Optional
+from typing import List, Dict
 from PySide6.QtWidgets import QMessageBox
 
-# Windows注册表模块，仅在Windows系统上可用
-try:
-    import winreg
-except ImportError:
-    winreg = None
-
-# 导入权限管理器
+# 导入安全的PyWin32注册表封装
+from .pywin32_registry import PyWin32Registry
 from .permission_manager import PermissionManager
 
-
 class FileAssociationManager:
-    """文件关联管理器"""
+    """安全的文件关联管理器，使用PyWin32接口"""
     
     def __init__(self):
-        self.app_name = "GudaZip"
-        self.app_description = "GudaZip 压缩管理器"
         self.prog_id = "GudaZip.Archive"
+        self.app_description = "GudaZip压缩文件"
+        self.registry = PyWin32Registry()
         
+        # 支持的压缩文件扩展名
+        self.supported_extensions = [
+            '.zip', '.rar', '.7z', '.tar', '.gz', 
+            '.bz2', '.xz', '.lzma', '.z', '.tgz'
+        ]
+    
     @staticmethod
     def get_app_path() -> str:
-        """获取应用程序路径"""
+        """获取应用程序的实际路径"""
         if getattr(sys, 'frozen', False):
             # 如果是打包的exe
             return sys.executable
         else:
-            # 如果是直接运行的Python脚本
-            # 当前文件: src/gudazip/core/file_association_manager.py
-            # 项目根目录需要上4级: core -> gudazip -> src -> 根目录
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-            main_py = os.path.join(project_root, 'main.py')
+            # 如果是Python脚本
+            script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            main_py = os.path.join(script_dir, "main.py")
             if os.path.exists(main_py):
                 return f'"{sys.executable}" "{main_py}"'
-            return f'"{sys.executable}" "{__file__}"'
+            else:
+                return sys.executable
     
     def is_admin(self) -> bool:
         """检查是否有管理员权限"""
         return PermissionManager.is_admin()
     
-
-    
-    def register_file_association(self, extensions: List[str], set_as_default: bool = False) -> bool:
-        """注册文件关联"""
-        if sys.platform != "win32" or winreg is None:
-            QMessageBox.warning(None, "不支持", "文件关联功能仅在Windows系统上可用")
-            return False
+    def register_file_association(self, extensions: List[str], set_as_default: bool = False) -> Dict[str, any]:
+        """
+        安全地注册文件关联
+        只针对特定的压缩文件格式，使用用户级别注册表
+        """
+        result = {
+            "success": False,
+            "message": "",
+            "details": {},
+            "success_count": 0,
+            "total_operations": len(extensions)
+        }
         
-        # 使用统一的权限管理系统
-        # 注册表操作需要管理员权限，检查 HKEY_CLASSES_ROOT 访问权限
-        registry_paths = ["HKEY_CLASSES_ROOT"]  # 模拟需要权限的路径
-        if not PermissionManager.request_admin_if_needed(registry_paths, "设置文件关联"):
-            return False
+        # 注：使用HKEY_CURRENT_USER，不需要管理员权限
+        
+        if not self.registry.is_available():
+            status = self.registry.get_module_status()
+            missing_modules = status.get('missing_modules', [])
+            result["message"] = f"PyWin32基础模块不可用。缺失模块: {missing_modules}"
+            result["details"] = status
+            return result
         
         try:
+            # 获取应用程序路径和图标
             app_path = self.get_app_path()
-            app_dir = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__)
-            icon_path = os.path.join(app_dir, "resources", "icons", "app_icon.ico")
             
-            # 注册程序ID
-            self._register_prog_id(app_path, icon_path)
+            # 正确计算图标路径
+            if getattr(sys, 'frozen', False):
+                # 如果是打包的exe，图标在同目录下
+                icon_path = os.path.join(os.path.dirname(sys.executable), "resources", "icons", "gudazip.ico")
+            else:
+                # 如果是Python脚本，从项目根目录获取图标
+                script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+                icon_path = os.path.join(script_dir, "resources", "icons", "gudazip.ico")
             
-            # 注册文件扩展名
+            success_count = 0
+            details = {}
+            
             for ext in extensions:
-                self._register_extension(ext, set_as_default)
-            
-            # 刷新Shell关联
-            self._refresh_shell_associations()
-            
-            return True
-            
-        except PermissionError:
-            QMessageBox.warning(None, "权限不足", 
-                              "修改文件关联需要管理员权限。\n"
-                              "请以管理员身份运行程序，或手动设置文件关联。")
-            return False
-        except Exception as e:
-            QMessageBox.critical(None, "错误", f"设置文件关联失败：{str(e)}")
-            return False
-    
-    def _register_prog_id(self, app_path: str, icon_path: str):
-        """注册程序ID"""
-        try:
-            # 创建程序ID键
-            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, self.prog_id) as key:
-                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, self.app_description)
-            
-            # 设置图标
-            if os.path.exists(icon_path):
-                with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, f"{self.prog_id}\\DefaultIcon") as key:
-                    winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f'"{icon_path}",0')
-            
-            # 设置打开命令
-            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, f"{self.prog_id}\\shell\\open\\command") as key:
-                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f'{app_path} "%1"')
-                
-        except Exception as e:
-            raise Exception(f"注册程序ID失败: {e}")
-    
-    def _register_extension(self, extension: str, set_as_default: bool):
-        """注册文件扩展名"""
-        try:
-            # 确保扩展名以点开头
-            if not extension.startswith('.'):
-                extension = '.' + extension
-            
-            if set_as_default:
-                # 设置为默认程序（系统级别）
-                with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, extension) as key:
-                    winreg.SetValueEx(key, "", 0, winreg.REG_SZ, self.prog_id)
-            
-            # 添加到用户选择列表
-            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, f"{extension}\\OpenWithProgids") as key:
-                winreg.SetValueEx(key, self.prog_id, 0, winreg.REG_NONE, b"")
-                
-        except Exception as e:
-            raise Exception(f"注册扩展名 {extension} 失败: {e}")
-    
-    def _refresh_shell_associations(self):
-        """刷新Shell文件关联"""
-        try:
-            # 通知系统文件关联已更改
-            import ctypes
-            from ctypes import wintypes
-            
-            SHCNE_ASSOCCHANGED = 0x08000000
-            SHCNF_IDLIST = 0x0000
-            
-            ctypes.windll.shell32.SHChangeNotify(
-                SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None
-            )
-            
-        except Exception as e:
-            print(f"刷新Shell关联失败: {e}")
-    
-    def unregister_file_association(self, extensions: List[str]) -> bool:
-        """取消文件关联"""
-        if sys.platform != "win32" or winreg is None:
-            return False
-        
-        # 使用统一的权限管理系统
-        # 注册表操作需要管理员权限，检查 HKEY_CLASSES_ROOT 访问权限
-        registry_paths = ["HKEY_CLASSES_ROOT"]  # 模拟需要权限的路径
-        if not PermissionManager.request_admin_if_needed(registry_paths, "取消文件关联"):
-            return False
-        
-        try:
-            for ext in extensions:
-                if not ext.startswith('.'):
-                    ext = '.' + ext
-                
-                # 从OpenWithProgids中移除
                 try:
-                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, f"{ext}\\OpenWithProgids", 0, winreg.KEY_SET_VALUE) as key:
-                        winreg.DeleteValue(key, self.prog_id)
-                except FileNotFoundError:
-                    pass  # 键不存在，忽略
-                except OSError:
-                    pass  # 值不存在，忽略
+                    # 确保是支持的扩展名
+                    if not ext.startswith('.'):
+                        ext = '.' + ext
+                    
+                    if ext not in self.supported_extensions:
+                        details[ext] = {"success": False, "error": "不支持的文件格式"}
+                        continue
+                    
+                    # 使用安全的文件关联方法
+                    if self.registry.register_file_association_safe(
+                        ext, self.prog_id, self.app_description, icon_path, app_path
+                    ):
+                        success_count += 1
+                        details[ext] = {"success": True, "as_default": set_as_default}
+                        print(f"✅ 文件关联成功: {ext}")
+                    else:
+                        details[ext] = {"success": False, "error": "注册失败"}
+                        print(f"❌ 文件关联失败: {ext}")
+                        
+                except Exception as e:
+                    details[ext] = {"success": False, "error": str(e)}
+                    print(f"❌ 文件关联异常: {ext} -> {e}")
             
             # 刷新Shell关联
-            self._refresh_shell_associations()
-            return True
+            self.registry.refresh_shell()
+            
+            result.update({
+                "success": success_count > 0,
+                "message": f"文件关联完成！成功关联 {success_count}/{len(extensions)} 个格式",
+                "details": details,
+                "success_count": success_count
+            })
+            
+            return result
             
         except Exception as e:
-            QMessageBox.critical(None, "错误", f"取消文件关联失败：{str(e)}")
-            return False
+            result.update({
+                "success": False,
+                "message": f"文件关联失败：{str(e)}",
+                "error": str(e)
+            })
+            return result
+    
+    def unregister_file_association(self, extensions: List[str]) -> Dict[str, any]:
+        """
+        安全地取消文件关联
+        """
+        result = {
+            "success": False,
+            "message": "",
+            "details": {},
+            "success_count": 0,
+            "total_operations": len(extensions)
+        }
+        
+        # 注：使用HKEY_CURRENT_USER，不需要管理员权限
+        
+        if not self.registry.is_available():
+            status = self.registry.get_module_status()
+            missing_modules = status.get('missing_modules', [])
+            result["message"] = f"PyWin32基础模块不可用。缺失模块: {missing_modules}"
+            result["details"] = status
+            return result
+        
+        try:
+            success_count = 0
+            details = {}
+            
+            for ext in extensions:
+                try:
+                    if not ext.startswith('.'):
+                        ext = '.' + ext
+                    
+                    # 使用安全的取消关联方法
+                    if self.registry.unregister_file_association_safe(ext, self.prog_id):
+                        success_count += 1
+                        details[ext] = {"success": True}
+                        print(f"✅ 取消关联成功: {ext}")
+                    else:
+                        details[ext] = {"success": False, "error": "取消关联失败"}
+                        print(f"❌ 取消关联失败: {ext}")
+                        
+                except Exception as e:
+                    details[ext] = {"success": False, "error": str(e)}
+                    print(f"❌ 取消关联异常: {ext} -> {e}")
+            
+            # 刷新Shell关联
+            self.registry.refresh_shell()
+            
+            result.update({
+                "success": success_count > 0,
+                "message": f"取消文件关联完成！成功取消 {success_count}/{len(extensions)} 个格式",
+                "details": details,
+                "success_count": success_count
+            })
+            
+            return result
+            
+        except Exception as e:
+            result.update({
+                "success": False,
+                "message": f"取消文件关联失败：{str(e)}",
+                "error": str(e)
+            })
+            return result
     
     def check_association_status(self, extensions: List[str]) -> Dict[str, bool]:
         """检查文件关联状态"""
         status = {}
         
-        if sys.platform != "win32" or winreg is None:
+        if not self.registry.is_available():
             for ext in extensions:
                 status[ext] = False
             return status
@@ -188,210 +206,295 @@ class FileAssociationManager:
         for ext in extensions:
             if not ext.startswith('.'):
                 ext = '.' + ext
-            
             try:
-                # 检查是否在OpenWithProgids中
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, f"{ext}\\OpenWithProgids") as key:
-                    try:
-                        winreg.QueryValueEx(key, self.prog_id)
-                        status[ext] = True
-                    except FileNotFoundError:
-                        status[ext] = False
-            except FileNotFoundError:
+                status[ext] = self.registry.check_file_association(ext, self.prog_id)
+            except Exception:
                 status[ext] = False
         
         return status
+    
+    def install_context_menu(self, menu_options: Dict[str, bool]) -> Dict[str, any]:
+        """
+        安全地安装右键菜单
+        为普通文件/文件夹添加压缩功能，为压缩文件添加解压功能
+        """
+        result = {
+            "success": False,
+            "message": "",
+            "details": {},
+            "success_count": 0,
+            "total_operations": 0
+        }
         
-    def install_context_menu(self, menu_options: Dict[str, bool]) -> bool:
-        """安装右键菜单"""
-        if sys.platform != "win32" or winreg is None:
-            QMessageBox.warning(None, "不支持", "右键菜单功能仅在Windows系统上可用")
-            return False
-        
-        # 使用统一的权限管理系统
-        # 注册表操作需要管理员权限，检查 HKEY_CLASSES_ROOT 访问权限
-        registry_paths = ["HKEY_CLASSES_ROOT"]  # 模拟需要权限的路径
-        if not PermissionManager.request_admin_if_needed(registry_paths, "安装右键菜单"):
-            return False
+        if not self.registry.is_available():
+            status = self.registry.get_module_status()
+            missing_modules = status.get('missing_modules', [])
+            result["message"] = f"PyWin32基础模块不可用。缺失模块: {missing_modules}"
+            result["details"] = status
+            return result
         
         try:
+            # 获取应用程序路径
             app_path = self.get_app_path()
             
-            # 安装到所有文件的右键菜单
-            self._install_shell_menu("*", menu_options, app_path)
+            # 正确计算图标路径
+            if getattr(sys, 'frozen', False):
+                # 如果是打包的exe，图标在同目录下
+                icon_path = os.path.join(os.path.dirname(sys.executable), "resources", "icons", "gudazip.ico")
+            else:
+                # 如果是Python脚本，从项目根目录获取图标
+                script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+                icon_path = os.path.join(script_dir, "resources", "icons", "gudazip.ico")
             
-            # 安装到文件夹的右键菜单
-            self._install_shell_menu("Folder", menu_options, app_path)
+            success_count = 0
+            total_operations = 0
             
-            # 安装到文件夹背景的右键菜单
-            self._install_shell_menu("Directory\\Background", menu_options, app_path)
+            # 1. 为普通文件和文件夹添加压缩菜单
+            compression_targets = []
+            compression_menu_items = {}
             
-            # 刷新Shell关联
-            self._refresh_shell_associations()
+            # 为所有文件添加压缩选项
+            if menu_options.get("add", False) or menu_options.get("zip", False) or menu_options.get("7z", False):
+                compression_targets.extend(["*", "Directory", "Directory\\Background"])
+                
+                if menu_options.get("add", False):
+                    compression_menu_items["add"] = {
+                        "display_name": "GudaZip - 添加到压缩包",
+                        "command": f'{app_path} --add "%1"',
+                        "icon_path": icon_path
+                    }
+                
+                if menu_options.get("zip", False):
+                    compression_menu_items["zip"] = {
+                        "display_name": "GudaZip - 压缩为ZIP",
+                        "command": f'{app_path} --compress-zip "%1"',
+                        "icon_path": icon_path
+                    }
+                
+                if menu_options.get("7z", False):
+                    compression_menu_items["7z"] = {
+                        "display_name": "GudaZip - 压缩为7Z",
+                        "command": f'{app_path} --compress-7z "%1"',
+                        "icon_path": icon_path
+                    }
+                
+                total_operations += len(compression_targets) * len(compression_menu_items)
+                
+                # 为普通文件和文件夹创建压缩菜单
+                if self.registry.create_context_menu_for_files_and_folders(
+                    compression_targets, compression_menu_items
+                ):
+                    success_count += len(compression_targets) * len(compression_menu_items)
+                    print("✅ 为普通文件和文件夹添加压缩菜单成功")
+                else:
+                    print("❌ 为普通文件和文件夹添加压缩菜单失败")
             
-            return True
+            # 2. 为压缩文件添加解压菜单（但首先需要移除可能存在的压缩菜单）
+            extraction_menu_items = {}
             
-        except PermissionError:
-            QMessageBox.warning(None, "权限不足", 
-                              "安装右键菜单需要管理员权限。\n"
-                              "请以管理员身份运行程序。")
-            return False
+            if menu_options.get("extract", False) or menu_options.get("open", False):
+                # 先移除压缩文件上的压缩菜单
+                compression_menu_ids_to_remove = ["add", "zip", "7z"]
+                self.registry.remove_context_menu_safe(
+                    self.supported_extensions, compression_menu_ids_to_remove
+                )
+                
+                if menu_options.get("extract", False):
+                    extraction_menu_items["extract"] = {
+                        "display_name": "GudaZip - 解压到此处", 
+                        "command": f'{app_path} --extract-here "%1"',
+                        "icon_path": icon_path
+                    }
+                    extraction_menu_items["extract_to"] = {
+                        "display_name": "GudaZip - 解压到新文件夹", 
+                        "command": f'{app_path} --extract-to "%1"',
+                        "icon_path": icon_path
+                    }
+                
+                if menu_options.get("open", False):
+                    extraction_menu_items["open"] = {
+                        "display_name": "GudaZip - 打开压缩包",
+                        "command": f'{app_path} --open "%1"',
+                        "icon_path": icon_path
+                    }
+                
+                total_operations += len(self.supported_extensions) * len(extraction_menu_items)
+                
+                # 为压缩文件创建解压菜单
+                if self.registry.create_context_menu_safe(
+                    self.supported_extensions, extraction_menu_items
+                ):
+                    success_count += len(self.supported_extensions) * len(extraction_menu_items)
+                    print("✅ 为压缩文件添加解压菜单成功")
+                else:
+                    print("❌ 为压缩文件添加解压菜单失败")
+            
+            if success_count > 0:
+                # 刷新Shell关联
+                self.registry.refresh_shell()
+                
+                result.update({
+                    "success": True,
+                    "message": f"右键菜单安装成功！共创建 {success_count} 个菜单项",
+                    "success_count": success_count,
+                    "total_operations": total_operations
+                })
+            else:
+                result.update({
+                    "success": False,
+                    "message": "右键菜单安装失败",
+                    "success_count": 0,
+                    "total_operations": total_operations
+                })
+            
+            return result
+            
         except Exception as e:
-            QMessageBox.critical(None, "错误", f"安装右键菜单失败：{str(e)}")
-            return False
+            result.update({
+                "success": False,
+                "message": f"安装右键菜单失败：{str(e)}",
+                "error": str(e)
+            })
+            return result
     
-    def _install_shell_menu(self, target: str, menu_options: Dict[str, bool], app_path: str):
-        """为指定目标安装Shell菜单"""
+    def uninstall_context_menu(self) -> Dict[str, any]:
+        """安全地卸载右键菜单"""
+        result = {
+            "success": False,
+            "message": "",
+            "details": {},
+            "success_count": 0,
+            "total_operations": 0
+        }
+        
+        if not self.registry.is_available():
+            status = self.registry.get_module_status()
+            missing_modules = status.get('missing_modules', [])
+            result["message"] = f"PyWin32基础模块不可用。缺失模块: {missing_modules}"
+            result["details"] = status
+            return result
+        
         try:
-            # 检查是否有任何菜单项被启用
-            enabled_items = [k for k, v in menu_options.items() if v]
-            if not enabled_items:
-                return
+            success_count = 0
+            total_operations = 0
             
-            # 创建主菜单项"GudaZip"，包含子菜单
-            main_menu_key = f"{target}\\shell\\GudaZip"
+            # 1. 移除普通文件和文件夹的压缩菜单
+            compression_targets = ["*", "Directory", "Directory\\Background"]
+            compression_menu_ids = ["add", "zip", "7z"]
             
-            # 创建主菜单项
-            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, main_menu_key) as key:
-                winreg.SetValueEx(key, "MUIVerb", 0, winreg.REG_SZ, "GudaZip")
-                winreg.SetValueEx(key, "subcommands", 0, winreg.REG_SZ, "")  # 小写的subcommands，设置为空字符串启用shell子菜单
+            total_operations += len(compression_targets) * len(compression_menu_ids)
+            
+            if self.registry.remove_context_menu_for_files_and_folders(
+                compression_targets, compression_menu_ids
+            ):
+                success_count += len(compression_targets) * len(compression_menu_ids)
+                print("✅ 移除普通文件和文件夹的压缩菜单成功")
+            else:
+                print("❌ 移除普通文件和文件夹的压缩菜单失败")
+            
+            # 2. 移除压缩文件的解压菜单
+            extraction_menu_ids = ["extract", "extract_to", "open"]
+            
+            total_operations += len(self.supported_extensions) * len(extraction_menu_ids)
+            
+            if self.registry.remove_context_menu_safe(
+                self.supported_extensions, extraction_menu_ids
+            ):
+                success_count += len(self.supported_extensions) * len(extraction_menu_ids)
+                print("✅ 移除压缩文件的解压菜单成功")
+            else:
+                print("❌ 移除压缩文件的解压菜单失败")
+            
+            if success_count > 0:
+                # 刷新Shell关联
+                self.registry.refresh_shell()
                 
-                # 设置图标
-                app_exe = app_path.split('"')[1] if '"' in app_path else app_path.split()[0]
-                winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, f'"{app_exe}",0')
+                result.update({
+                    "success": True,
+                    "message": f"右键菜单卸载成功！共移除 {success_count} 个菜单项",
+                    "success_count": success_count,
+                    "total_operations": total_operations
+                })
+            else:
+                result.update({
+                    "success": False,
+                    "message": "右键菜单卸载失败",
+                    "success_count": 0,
+                    "total_operations": total_operations
+                })
             
-            # 创建子菜单容器
-            submenu_shell_key = f"{main_menu_key}\\shell"
+            return result
             
-            # 创建各个子菜单项（使用数字前缀控制显示顺序）
-            if menu_options.get('7z', False):
-                self._create_submenu_item(submenu_shell_key, "1_7z", "创建同名7Z压缩包", app_path, "--compress-7z")
-            
-            if menu_options.get('zip', False):
-                self._create_submenu_item(submenu_shell_key, "2_zip", "创建同名ZIP压缩包", app_path, "--compress-zip")
-            
-            if menu_options.get('add', False):
-                self._create_submenu_item(submenu_shell_key, "3_add", "添加到压缩包", app_path, "--add")
-            
-            if menu_options.get('extract', False):
-                self._create_submenu_item(submenu_shell_key, "4_extract", "解压到此处", app_path, "--extract-here")
-            
-            if menu_options.get('open', False):
-                self._create_submenu_item(submenu_shell_key, "5_open", "用GudaZip打开", app_path, "--open")
-                
         except Exception as e:
-            raise Exception(f"为 {target} 安装Shell菜单失败: {e}")
+            result.update({
+                "success": False,
+                "message": f"卸载右键菜单失败：{str(e)}",
+                "error": str(e)
+            })
+            return result
     
-    def _create_submenu_item(self, parent_key: str, item_id: str, display_name: str, app_path: str, command_arg: str):
-        """在子菜单中创建菜单项"""
+    def check_context_menu_status(self) -> Dict[str, Dict[str, bool]]:
+        """检查右键菜单状态"""
+        status = {
+            "files_and_folders": {},  # 普通文件和文件夹的压缩菜单
+            "archives": {}            # 压缩文件的解压菜单
+        }
+        
+        if not self.registry.is_available():
+            return status
+        
         try:
-            item_key = f"{parent_key}\\{item_id}"
-            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, item_key) as key:
-                # 设置默认值（这是菜单显示的文字）
-                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, display_name)
-                
-                # 设置图标
-                app_exe = app_path.split('"')[1] if '"' in app_path else app_path.split()[0]
-                winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, f'"{app_exe}",0')
+            # 1. 检查普通文件和文件夹的压缩菜单
+            compression_targets = ["*", "Directory", "Directory\\Background"]
+            compression_menu_ids = ["add", "zip", "7z"]
             
-            # 创建命令
-            command_key = f"{item_key}\\command"
-            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, command_key) as key:
-                command = f'{app_path} {command_arg} "%1"'
-                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, command)
+            for target in compression_targets:
+                target_status = {}
+                for menu_id in compression_menu_ids:
+                    target_status[menu_id] = self.registry.check_general_context_menu(target, menu_id)
+                status["files_and_folders"][target] = target_status
+            
+            # 2. 检查压缩文件的解压菜单
+            extraction_menu_ids = ["extract", "extract_to", "open"]
+            
+            for ext in self.supported_extensions:
+                ext_status = {}
+                for menu_id in extraction_menu_ids:
+                    menus = self.registry.list_context_menus(ext)
+                    ext_status[menu_id] = menu_id in menus
+                status["archives"][ext] = ext_status
                 
         except Exception as e:
-            raise Exception(f"创建子菜单项 {item_id} 失败: {e}")
-    
+            print(f"检查右键菜单状态失败: {e}")
+        
+        return status
 
+    # 兼容旧接口的方法（返回简化结果）
+    def register_file_association_simple(self, extensions: List[str], set_as_default: bool = False) -> bool:
+        """简化的文件关联注册接口（向后兼容）"""
+        result = self.register_file_association(extensions, set_as_default)
+        return result.get("success", False)
     
-    def uninstall_context_menu(self) -> bool:
-        """卸载右键菜单"""
-        if sys.platform != "win32" or winreg is None:
-            return False
-        
-        # 使用统一的权限管理系统
-        # 注册表操作需要管理员权限，检查 HKEY_CLASSES_ROOT 访问权限
-        registry_paths = ["HKEY_CLASSES_ROOT"]  # 模拟需要权限的路径
-        if not PermissionManager.request_admin_if_needed(registry_paths, "卸载右键菜单"):
-            return False
-        
-        try:
-            # 从各个位置删除菜单
-            targets = ["*", "Folder", "Directory\\Background"]
-            
-            for target in targets:
-                try:
-                    # 删除主菜单项（可能包含子菜单）
-                    menu_key = f"{target}\\shell\\GudaZip"
-                    self._delete_registry_key_recursive(winreg.HKEY_CLASSES_ROOT, menu_key)
-                except FileNotFoundError:
-                    pass  # 键不存在，忽略
-                except Exception as e:
-                    print(f"删除 {target} 的GudaZip菜单失败: {e}")
-                
-                # 删除可能的单个菜单项（包括旧版本和新版本的键名）
-                old_menu_items = ["GudaZip_Add", "GudaZip_Extract", "GudaZip_Open", "GudaZip_Zip", "GudaZip_7z"]
-                new_menu_items = ["1_7z", "2_zip", "3_add", "4_extract", "5_open"]
-                legacy_menu_items = ["add", "extract", "open", "zip", "7z"]  # 之前版本的键名
-                
-                all_menu_items = old_menu_items + new_menu_items + legacy_menu_items
-                
-                for item in all_menu_items:
-                    try:
-                        item_key = f"{target}\\shell\\{item}"
-                        self._delete_registry_key_recursive(winreg.HKEY_CLASSES_ROOT, item_key)
-                    except FileNotFoundError:
-                        pass  # 键不存在，忽略
-                    except Exception as e:
-                        pass  # 忽略删除失败，避免过多输出
-            
-            # 刷新Shell关联
-            self._refresh_shell_associations()
-            
-            return True
-            
-        except Exception as e:
-            QMessageBox.critical(None, "错误", f"卸载右键菜单失败：{str(e)}")
-            return False
+    def unregister_file_association_simple(self, extensions: List[str]) -> bool:
+        """简化的文件关联取消接口（向后兼容）"""
+        result = self.unregister_file_association(extensions)
+        return result.get("success", False)
     
-    def _delete_registry_key_recursive(self, hkey, key_path: str):
-        """递归删除注册表键"""
-        try:
-            with winreg.OpenKey(hkey, key_path, 0, winreg.KEY_ALL_ACCESS) as key:
-                # 获取所有子键
-                subkeys = []
-                i = 0
-                while True:
-                    try:
-                        subkey_name = winreg.EnumKey(key, i)
-                        subkeys.append(subkey_name)
-                        i += 1
-                    except OSError:
-                        break
-                
-                # 递归删除所有子键
-                for subkey in subkeys:
-                    self._delete_registry_key_recursive(hkey, f"{key_path}\\{subkey}")
-            
-            # 删除当前键
-            winreg.DeleteKey(hkey, key_path)
-            
-        except FileNotFoundError:
-            pass  # 键不存在，忽略
-        except Exception as e:
-            raise Exception(f"删除注册表键 {key_path} 失败: {e}")
+    def install_context_menu_simple(self, menu_options: Dict[str, bool]) -> bool:
+        """简化的右键菜单安装接口（向后兼容）"""
+        result = self.install_context_menu(menu_options)
+        return result.get("success", False)
     
-    def check_context_menu_status(self) -> bool:
-        """检查右键菜单安装状态"""
-        if sys.platform != "win32" or winreg is None:
-            return False
-        
-        try:
-            # 检查是否存在主菜单项
-            winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "*\\shell\\GudaZip")
-            return True
-        except FileNotFoundError:
-            return False
-        except Exception:
-            return False 
+    def uninstall_context_menu_simple(self) -> bool:
+        """简化的右键菜单卸载接口（向后兼容）"""
+        result = self.uninstall_context_menu()
+        return result.get("success", False)
+    
+    def check_context_menu_status_simple(self) -> bool:
+        """简化的右键菜单状态检查接口（向后兼容）"""
+        status = self.check_context_menu_status()
+        # 如果任何文件类型有任何菜单项，就认为已安装
+        for ext_status in status.values():
+            if any(ext_status.values()):
+                return True
+        return False 
