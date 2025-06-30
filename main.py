@@ -175,17 +175,21 @@ def main():
                     
             i += 1
         
-        window.show()
-        
-        # 处理右键菜单命令
+        # 处理右键菜单命令 - 不显示主窗口
         if context_menu_action and target_file:
             try:
                 handle_context_menu_action(window, context_menu_action, target_file)
+                # 右键菜单操作完成后，如果没有其他需要，直接退出
+                return 0
             except Exception as e:
-                QMessageBox.warning(window, "操作失败", f"执行右键菜单操作失败：{str(e)}")
+                QMessageBox.warning(None, "操作失败", f"执行右键菜单操作失败：{str(e)}")
+                return 1
+        
+        # 显示主窗口（只在非右键菜单模式下）
+        window.show()
         
         # 如果有压缩文件参数，在窗口显示后打开它
-        elif archive_file:
+        if archive_file:
             try:
                 window.load_archive_from_commandline(archive_file)
             except Exception as e:

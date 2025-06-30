@@ -253,30 +253,16 @@ class FileAssociationManager:
             compression_targets = []
             compression_menu_items = {}
             
-            # 为所有文件添加压缩选项
+            # 为所有文件添加压缩选项 - 只保留一个统一的压缩功能
             if menu_options.get("add", False) or menu_options.get("zip", False) or menu_options.get("7z", False):
                 compression_targets.extend(["*", "Directory", "Directory\\Background"])
                 
-                if menu_options.get("add", False):
-                    compression_menu_items["add"] = {
-                        "display_name": "GudaZip - 添加到压缩包",
-                        "command": f'{app_path} --add "%1"',
-                        "icon_path": icon_path
-                    }
-                
-                if menu_options.get("zip", False):
-                    compression_menu_items["zip"] = {
-                        "display_name": "GudaZip - 压缩为ZIP",
-                        "command": f'{app_path} --compress-zip "%1"',
-                        "icon_path": icon_path
-                    }
-                
-                if menu_options.get("7z", False):
-                    compression_menu_items["7z"] = {
-                        "display_name": "GudaZip - 压缩为7Z",
-                        "command": f'{app_path} --compress-7z "%1"',
-                        "icon_path": icon_path
-                    }
+                # 统一的压缩菜单
+                compression_menu_items["compress"] = {
+                    "display_name": "使用Gudazip压缩",
+                    "command": f'{app_path} --add "%1"',
+                    "icon_path": icon_path
+                }
                 
                 total_operations += len(compression_targets) * len(compression_menu_items)
                 
@@ -294,7 +280,7 @@ class FileAssociationManager:
             
             if menu_options.get("extract", False) or menu_options.get("open", False):
                 # 先移除压缩文件上的压缩菜单
-                compression_menu_ids_to_remove = ["add", "zip", "7z"]
+                compression_menu_ids_to_remove = ["compress"]
                 self.registry.remove_context_menu_safe(
                     self.supported_extensions, compression_menu_ids_to_remove
                 )
@@ -380,7 +366,7 @@ class FileAssociationManager:
             
             # 1. 移除普通文件和文件夹的压缩菜单
             compression_targets = ["*", "Directory", "Directory\\Background"]
-            compression_menu_ids = ["add", "zip", "7z"]
+            compression_menu_ids = ["compress"]
             
             total_operations += len(compression_targets) * len(compression_menu_ids)
             
@@ -446,7 +432,7 @@ class FileAssociationManager:
         try:
             # 1. 检查普通文件和文件夹的压缩菜单
             compression_targets = ["*", "Directory", "Directory\\Background"]
-            compression_menu_ids = ["add", "zip", "7z"]
+            compression_menu_ids = ["compress"]
             
             for target in compression_targets:
                 target_status = {}
