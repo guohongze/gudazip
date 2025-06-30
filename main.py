@@ -155,8 +155,8 @@ def main():
             arg = sys.argv[i]
             
             if arg.startswith('--'):
-                # 处理右键菜单命令
-                if arg in ['--add', '--extract-here', '--open', '--compress-zip', '--compress-7z']:
+                # 处理右键菜单命令 - 简化后的参数
+                if arg in ['--add', '--extract-dialog']:
                     context_menu_action = arg
                     # 获取目标文件（下一个参数）
                     if i + 1 < len(sys.argv):
@@ -213,7 +213,7 @@ def handle_context_menu_action(window, action, target_file):
     from gudazip.ui.extract_archive_dialog import ExtractArchiveDialog
     
     if action == '--add':
-        # 添加到压缩包 - 生成默认压缩包路径
+        # 使用Gudazip压缩 - 弹出创建压缩包对话框
         # 获取文件的目录和基本名称（去掉扩展名）
         file_dir = os.path.dirname(target_file)
         file_base = os.path.splitext(os.path.basename(target_file))[0]
@@ -230,62 +230,21 @@ def handle_context_menu_action(window, action, target_file):
         dialog.update_ui_state()
         dialog.exec()
         
-    elif action == '--extract-here':
-        # 解压到此处
+    elif action == '--extract-dialog':
+        # 使用Gudazip解压 - 弹出解压对话框
         if window.archive_manager.is_archive_file(target_file):
-            extract_path = os.path.dirname(target_file)
-            try:
-                success = window.archive_manager.extract_archive(target_file, extract_path)
-                if success:
-                    QMessageBox.information(window, "成功", f"文件已解压到：{extract_path}")
-                else:
-                    QMessageBox.warning(window, "失败", "解压操作失败")
-            except Exception as e:
-                QMessageBox.critical(window, "错误", f"解压失败：{str(e)}")
+            dialog = ExtractArchiveDialog(
+                archive_manager=window.archive_manager,
+                archive_path=target_file,
+                selected_files=None,
+                parent=window
+            )
+            dialog.exec()
         else:
-            QMessageBox.warning(window, "错误", "选择的文件不是有效的压缩包")
-            
-    elif action == '--open':
-        # 用GudaZip打开
-        if window.archive_manager.is_archive_file(target_file):
-            window.open_archive_in_browser(target_file)
-        else:
-            QMessageBox.warning(window, "错误", "选择的文件不是有效的压缩包")
-            
-    elif action == '--compress-zip':
-        # 压缩到.zip文件
-        base_name = os.path.splitext(target_file)[0]
-        output_path = f"{base_name}.zip"
-        _create_archive(window, target_file, output_path, 'zip')
-        
-    elif action == '--compress-7z':
-        # 压缩到.7z文件
-        base_name = os.path.splitext(target_file)[0]
-        output_path = f"{base_name}.7z"
-        _create_archive(window, target_file, output_path, '7z')
+            QMessageBox.warning(None, "错误", "选择的文件不是有效的压缩包")
 
 
-def _create_archive(window, target_file, output_path, format_type):
-    """创建压缩包的辅助函数"""
-    try:
-        success = window.archive_manager.create_archive(
-            output_path,        # 第一个参数：输出文件路径
-            [target_file],      # 第二个参数：要压缩的文件列表
-            6,                  # 第三个参数：压缩级别（默认6）
-            None                # 第四个参数：密码（默认None）
-        )
-        
-        if success:
-            # 显示成功消息，包含实际创建的文件名
-            filename = os.path.basename(target_file)
-            output_filename = os.path.basename(output_path)
-            QMessageBox.information(window, "压缩成功", 
-                                  f"已将 '{filename}' 压缩为 '{output_filename}'")
-        else:
-            QMessageBox.warning(window, "压缩失败", "创建压缩包失败")
-            
-    except Exception as e:
-        QMessageBox.critical(window, "压缩错误", f"创建压缩包失败：{str(e)}")
+
 
 
 if __name__ == "__main__":

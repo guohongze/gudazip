@@ -285,22 +285,18 @@ class FileAssociationManager:
                     self.supported_extensions, compression_menu_ids_to_remove
                 )
                 
-                if menu_options.get("extract", False):
-                    extraction_menu_items["extract"] = {
-                        "display_name": "GudaZip - 解压到此处", 
-                        "command": f'{app_path} --extract-here "%1"',
-                        "icon_path": icon_path
-                    }
-                    extraction_menu_items["extract_to"] = {
-                        "display_name": "GudaZip - 解压到新文件夹", 
-                        "command": f'{app_path} --extract-to "%1"',
+                # 简化的解压菜单 - 只保留两个选项
+                if menu_options.get("open", False):
+                    extraction_menu_items["open"] = {
+                        "display_name": "打开压缩包",
+                        "command": f'{app_path} "%1"',  # 直接打开，不使用--open参数
                         "icon_path": icon_path
                     }
                 
-                if menu_options.get("open", False):
-                    extraction_menu_items["open"] = {
-                        "display_name": "GudaZip - 打开压缩包",
-                        "command": f'{app_path} --open "%1"',
+                if menu_options.get("extract", False):
+                    extraction_menu_items["extract"] = {
+                        "display_name": "使用Gudazip解压", 
+                        "command": f'{app_path} --extract-dialog "%1"',  # 新的解压对话框参数
                         "icon_path": icon_path
                     }
                 
@@ -379,7 +375,7 @@ class FileAssociationManager:
                 print("❌ 移除普通文件和文件夹的压缩菜单失败")
             
             # 2. 移除压缩文件的解压菜单
-            extraction_menu_ids = ["extract", "extract_to", "open"]
+            extraction_menu_ids = ["extract", "open"]
             
             total_operations += len(self.supported_extensions) * len(extraction_menu_ids)
             
@@ -441,7 +437,7 @@ class FileAssociationManager:
                 status["files_and_folders"][target] = target_status
             
             # 2. 检查压缩文件的解压菜单
-            extraction_menu_ids = ["extract", "extract_to", "open"]
+            extraction_menu_ids = ["extract", "open"]
             
             for ext in self.supported_extensions:
                 ext_status = {}
