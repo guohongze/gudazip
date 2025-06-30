@@ -209,8 +209,19 @@ def handle_context_menu_action(window, action, target_file):
     from gudazip.ui.extract_archive_dialog import ExtractArchiveDialog
     
     if action == '--add':
-        # 添加到压缩包
-        dialog = CreateArchiveDialog(window.archive_manager, "", window)
+        # 添加到压缩包 - 生成默认压缩包路径
+        # 获取文件的目录和基本名称（去掉扩展名）
+        file_dir = os.path.dirname(target_file)
+        file_base = os.path.splitext(os.path.basename(target_file))[0]
+        
+        # 如果是文件夹，使用文件夹名称
+        if os.path.isdir(target_file):
+            file_base = os.path.basename(target_file)
+        
+        # 生成默认的压缩包路径（使用.zip作为默认格式）
+        default_archive_path = os.path.join(file_dir, f"{file_base}.zip")
+        
+        dialog = CreateArchiveDialog(window.archive_manager, default_archive_path, window)
         dialog.selected_files.append(target_file)
         dialog.update_ui_state()
         dialog.exec()
