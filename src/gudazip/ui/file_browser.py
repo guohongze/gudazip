@@ -443,10 +443,22 @@ class FileBrowser(QWidget):
             
     def get_current_path(self):
         """获取当前选中的路径"""
-        current_index = self.file_view.get_current_index()
-        if current_index.isValid():
-            return self.file_model.filePath(current_index)
-        return ""
+        try:
+            current_index = self.file_view.get_current_index()
+            if current_index.isValid():
+                if self.archive_viewing_mode:
+                    # 压缩包模式：从archive_model获取文件路径
+                    item = self.archive_model.itemFromIndex(current_index)
+                    if item:
+                        file_path = item.data(Qt.UserRole + 1)
+                        return file_path if file_path else ""
+                    return ""
+                else:
+                    # 文件系统模式：使用file_model
+                    return self.file_model.filePath(current_index)
+            return ""
+        except Exception:
+            return ""
         
     def get_selected_paths(self):
         """获取所有选中的路径"""
