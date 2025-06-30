@@ -55,6 +55,7 @@ class SettingsDialog(QDialog):
         self.create_behavior_tab()
         self.create_window_tab()
         self.create_file_association_tab()
+        self.create_context_menu_tab()
         
         # 对话框按钮
         self.create_dialog_buttons(layout)
@@ -253,6 +254,61 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         self.tab_widget.addTab(tab, "文件关联")
         
+    def create_context_menu_tab(self):
+        """创建右键菜单设置页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # 右键菜单设置
+        context_menu_group = QGroupBox("右键菜单设置")
+        context_menu_layout = QVBoxLayout(context_menu_group)
+        
+        self.enable_context_menu_cb = QCheckBox("启用文件右键菜单")
+        context_menu_layout.addWidget(self.enable_context_menu_cb)
+        
+        # 右键菜单选项
+        menu_options_layout = QVBoxLayout()
+        menu_options_layout.setContentsMargins(20, 0, 0, 0)  # 添加左侧缩进
+        
+        self.context_menu_add_cb = QCheckBox("添加到压缩包")
+        self.context_menu_extract_cb = QCheckBox("解压到此处")
+        self.context_menu_open_cb = QCheckBox("用GudaZip打开")
+        self.context_menu_zip_cb = QCheckBox("压缩到 {文件名}.zip")
+        self.context_menu_7z_cb = QCheckBox("压缩到 {文件名}.7z")
+        
+        menu_options_layout.addWidget(self.context_menu_add_cb)
+        menu_options_layout.addWidget(self.context_menu_extract_cb)
+        menu_options_layout.addWidget(self.context_menu_open_cb)
+        menu_options_layout.addWidget(self.context_menu_zip_cb)
+        menu_options_layout.addWidget(self.context_menu_7z_cb)
+        
+        context_menu_layout.addLayout(menu_options_layout)
+        
+        # 右键菜单操作按钮
+        context_menu_buttons = QHBoxLayout()
+        
+        self.install_context_menu_btn = QPushButton("安装右键菜单")
+        self.install_context_menu_btn.clicked.connect(self.install_context_menu)
+        context_menu_buttons.addWidget(self.install_context_menu_btn)
+        
+        self.uninstall_context_menu_btn = QPushButton("卸载右键菜单")
+        self.uninstall_context_menu_btn.clicked.connect(self.uninstall_context_menu)
+        context_menu_buttons.addWidget(self.uninstall_context_menu_btn)
+        
+        context_menu_buttons.addStretch()
+        context_menu_layout.addLayout(context_menu_buttons)
+        
+        # 右键菜单警告提示
+        context_warning_label = QLabel("⚠️ 右键菜单功能需要管理员权限，修改后可能需要重新登录或重启资源管理器。")
+        context_warning_label.setStyleSheet("color: #ff6600; font-size: 9pt;")
+        context_warning_label.setWordWrap(True)
+        context_menu_layout.addWidget(context_warning_label)
+        
+        layout.addWidget(context_menu_group)
+        
+        layout.addStretch()
+        self.tab_widget.addTab(tab, "右键菜单")
+        
     def select_all_file_types(self):
         """全选文件类型"""
         for i in range(self.file_types_list.count()):
@@ -301,6 +357,24 @@ class SettingsDialog(QDialog):
         self.opacity_slider.valueChanged.connect(
             lambda v: self.opacity_label.setText(f"{v}%")
         )
+        
+        # 右键菜单启用状态变化
+        self.enable_context_menu_cb.stateChanged.connect(self.on_context_menu_enabled_changed)
+        
+    def on_context_menu_enabled_changed(self, state):
+        """右键菜单启用状态变化时的处理"""
+        enabled = state == 2  # Qt.Checked = 2
+        
+        # 启用/禁用子选项
+        self.context_menu_add_cb.setEnabled(enabled)
+        self.context_menu_extract_cb.setEnabled(enabled)
+        self.context_menu_open_cb.setEnabled(enabled)
+        self.context_menu_zip_cb.setEnabled(enabled)
+        self.context_menu_7z_cb.setEnabled(enabled)
+        
+        # 启用/禁用操作按钮
+        self.install_context_menu_btn.setEnabled(enabled)
+        self.uninstall_context_menu_btn.setEnabled(enabled)
         
     def load_current_settings(self):
         """加载当前设置"""
@@ -392,6 +466,33 @@ class SettingsDialog(QDialog):
                 self.config_manager.get_config('file_association.set_as_default', False)
             )
             
+            # 右键菜单设置
+            context_menu_installed = self.file_association_manager.check_context_menu_status()
+            
+            self.enable_context_menu_cb.setChecked(
+                context_menu_installed or self.config_manager.get_config('context_menu.enabled', False)
+            )
+            self.context_menu_add_cb.setChecked(
+                self.config_manager.get_config('context_menu.add', True)
+            )
+            self.context_menu_extract_cb.setChecked(
+                self.config_manager.get_config('context_menu.extract', True)
+            )
+            self.context_menu_open_cb.setChecked(
+                self.config_manager.get_config('context_menu.open', True)
+            )
+            self.context_menu_zip_cb.setChecked(
+                self.config_manager.get_config('context_menu.zip', True)
+            )
+            self.context_menu_7z_cb.setChecked(
+                self.config_manager.get_config('context_menu.7z', True)
+            )
+            
+            # 初始化右键菜单UI状态
+            self.on_context_menu_enabled_changed(
+                2 if self.enable_context_menu_cb.isChecked() else 0
+            )
+            
         except Exception as e:
             QMessageBox.warning(self, "警告", f"加载设置时出错：{e}")
     
@@ -436,6 +537,14 @@ class SettingsDialog(QDialog):
             
             self.config_manager.set_config('file_association.associated_types', associated_types)
             self.config_manager.set_config('file_association.set_as_default', self.set_as_default_cb.isChecked())
+            
+            # 右键菜单设置
+            self.config_manager.set_config('context_menu.enabled', self.enable_context_menu_cb.isChecked())
+            self.config_manager.set_config('context_menu.add', self.context_menu_add_cb.isChecked())
+            self.config_manager.set_config('context_menu.extract', self.context_menu_extract_cb.isChecked())
+            self.config_manager.set_config('context_menu.open', self.context_menu_open_cb.isChecked())
+            self.config_manager.set_config('context_menu.zip', self.context_menu_zip_cb.isChecked())
+            self.config_manager.set_config('context_menu.7z', self.context_menu_7z_cb.isChecked())
             
             # 保存配置
             self.config_manager.save_configs()
@@ -495,6 +604,14 @@ class SettingsDialog(QDialog):
             self.config_manager.set_config('file_association.associated_types', associated_types)
             self.config_manager.set_config('file_association.set_as_default', self.set_as_default_cb.isChecked())
             
+            # 右键菜单设置
+            self.config_manager.set_config('context_menu.enabled', self.enable_context_menu_cb.isChecked())
+            self.config_manager.set_config('context_menu.add', self.context_menu_add_cb.isChecked())
+            self.config_manager.set_config('context_menu.extract', self.context_menu_extract_cb.isChecked())
+            self.config_manager.set_config('context_menu.open', self.context_menu_open_cb.isChecked())
+            self.config_manager.set_config('context_menu.zip', self.context_menu_zip_cb.isChecked())
+            self.config_manager.set_config('context_menu.7z', self.context_menu_7z_cb.isChecked())
+            
             # 保存配置
             self.config_manager.save_configs()
             
@@ -523,4 +640,53 @@ class SettingsDialog(QDialog):
         if reply == QMessageBox.Yes:
             self.config_manager.reset_all_configs()
             self.load_current_settings()
-            QMessageBox.information(self, "成功", "设置已重置为默认值") 
+            QMessageBox.information(self, "成功", "设置已重置为默认值")
+    
+    def install_context_menu(self):
+        """安装右键菜单"""
+        try:
+            # 获取选中的菜单选项
+            menu_options = {
+                'add': self.context_menu_add_cb.isChecked(),
+                'extract': self.context_menu_extract_cb.isChecked(),
+                'open': self.context_menu_open_cb.isChecked(),
+                'zip': self.context_menu_zip_cb.isChecked(),
+                '7z': self.context_menu_7z_cb.isChecked()
+            }
+            
+            success = self.file_association_manager.install_context_menu(menu_options)
+            if success:
+                QMessageBox.information(self, "成功", "右键菜单安装成功！\n可能需要重新登录或重启资源管理器才能生效。")
+                self.enable_context_menu_cb.setChecked(True)
+            else:
+                QMessageBox.warning(self, "失败", "右键菜单安装失败，请检查是否有管理员权限。")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"安装右键菜单时发生错误：{str(e)}")
+    
+    def uninstall_context_menu(self):
+        """卸载右键菜单"""
+        try:
+            reply = QMessageBox.question(
+                self, "确认卸载",
+                "确定要卸载GudaZip右键菜单吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                success = self.file_association_manager.uninstall_context_menu()
+                if success:
+                    QMessageBox.information(self, "成功", "右键菜单卸载成功！")
+                    self.enable_context_menu_cb.setChecked(False)
+                    # 清除所有选项
+                    self.context_menu_add_cb.setChecked(False)
+                    self.context_menu_extract_cb.setChecked(False)
+                    self.context_menu_open_cb.setChecked(False)
+                    self.context_menu_zip_cb.setChecked(False)
+                    self.context_menu_7z_cb.setChecked(False)
+                else:
+                    QMessageBox.warning(self, "失败", "右键菜单卸载失败，请检查是否有管理员权限。")
+                    
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"卸载右键菜单时发生错误：{str(e)}") 

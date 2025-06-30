@@ -39,6 +39,10 @@ class PermissionManager:
         """检查操作指定文件是否需要管理员权限"""
         if not file_path:
             return False
+        
+        # 检查是否为注册表操作
+        if file_path.startswith("HKEY_"):
+            return True
             
         # 规范化路径，统一使用反斜杠
         file_path = os.path.normpath(file_path)
