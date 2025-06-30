@@ -274,10 +274,10 @@ class FileAssociationManager:
                 self._create_submenu_item(submenu_shell_key, "open", "用GudaZip打开", app_path, "--open")
             
             if menu_options.get('zip', False):
-                self._create_submenu_item(submenu_shell_key, "zip", "压缩到.zip", app_path, "--compress-zip")
+                self._create_submenu_item(submenu_shell_key, "zip", "创建同名ZIP压缩包", app_path, "--compress-zip")
             
             if menu_options.get('7z', False):
-                self._create_submenu_item(submenu_shell_key, "7z", "压缩到.7z", app_path, "--compress-7z")
+                self._create_submenu_item(submenu_shell_key, "7z", "创建同名7Z压缩包", app_path, "--compress-7z")
                 
         except Exception as e:
             raise Exception(f"为 {target} 安装Shell菜单失败: {e}")

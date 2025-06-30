@@ -254,18 +254,23 @@ def _create_archive(window, target_file, output_path, format_type):
     """创建压缩包的辅助函数"""
     try:
         success = window.archive_manager.create_archive(
-            [target_file], 
-            output_path, 
-            format_type
+            output_path,        # 第一个参数：输出文件路径
+            [target_file],      # 第二个参数：要压缩的文件列表
+            6,                  # 第三个参数：压缩级别（默认6）
+            None                # 第四个参数：密码（默认None）
         )
         
         if success:
-            QMessageBox.information(window, "成功", f"压缩包已创建：{output_path}")
+            # 显示成功消息，包含实际创建的文件名
+            filename = os.path.basename(target_file)
+            output_filename = os.path.basename(output_path)
+            QMessageBox.information(window, "压缩成功", 
+                                  f"已将 '{filename}' 压缩为 '{output_filename}'")
         else:
-            QMessageBox.warning(window, "失败", "创建压缩包失败")
+            QMessageBox.warning(window, "压缩失败", "创建压缩包失败")
             
     except Exception as e:
-        QMessageBox.critical(window, "错误", f"创建压缩包失败：{str(e)}")
+        QMessageBox.critical(window, "压缩错误", f"创建压缩包失败：{str(e)}")
 
 
 if __name__ == "__main__":
