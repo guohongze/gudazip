@@ -109,8 +109,29 @@ def main():
         # 设置应用程序图标
         try:
             icon_path = os.path.join(os.path.dirname(__file__), "resources", "icons", "app.ico")
+            print(f"图标路径: {icon_path}")
+            print(f"图标文件存在: {os.path.exists(icon_path)}")
+            
             if os.path.exists(icon_path):
-                app.setWindowIcon(QIcon(icon_path))
+                icon = QIcon(icon_path)
+                print(f"图标对象创建成功: {not icon.isNull()}")
+                
+                # 设置应用程序图标（影响所有窗口的默认图标）
+                app.setWindowIcon(icon)
+                
+                # 在Windows上，还需要设置应用程序ID来确保任务栏图标正确显示
+                if os.name == 'nt':
+                    try:
+                        import ctypes
+                        # 设置应用程序用户模型ID，这有助于Windows正确识别应用程序
+                        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('GudaZip.DesktopApp.1.0')
+                        print("已设置Windows应用程序ID")
+                    except Exception as e:
+                        print(f"设置Windows应用程序ID失败: {e}")
+                
+                print("✅ 应用程序图标设置完成")
+            else:
+                print("❌ 图标文件不存在，使用默认图标")
         except Exception as e:
             print(f"设置应用图标失败: {e}")
         

@@ -517,16 +517,25 @@ class MainWindow(QMainWindow):
             current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             icon_path = os.path.join(current_dir, "resources", "icons", "app.ico")
             
+            print(f"主窗口图标路径: {icon_path}")
+            print(f"主窗口图标文件存在: {os.path.exists(icon_path)}")
+            
             # 检查图标文件是否存在
             if os.path.exists(icon_path):
                 icon = QIcon(icon_path)
+                print(f"主窗口图标对象创建成功: {not icon.isNull()}")
+                
+                # 设置窗口图标
                 self.setWindowIcon(icon)
                 
                 # 同时设置应用程序图标（在任务栏中显示）
                 from PySide6.QtWidgets import QApplication
                 QApplication.instance().setWindowIcon(icon)
+                
+                print("✅ 主窗口图标设置完成")
             else:
                 # 如果图标文件不存在，使用FontAwesome图标作为备选
+                print("❌ 图标文件不存在，使用FontAwesome备选图标")
                 icon = qta.icon('fa5s.file-archive', color='#2e7d32')
                 self.setWindowIcon(icon)
                 
