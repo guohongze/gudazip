@@ -430,6 +430,32 @@ class CreateArchiveDialog(QDialog):
         self.create_button.clicked.connect(self.create_archive)
         bottom_layout.addWidget(self.create_button)
         
+        # 取消压缩按钮（初始隐藏，与创建按钮在同一位置）
+        self.cancel_button = QPushButton("取消压缩")
+        self.cancel_button.setMinimumSize(140, 42)
+        self.cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E0E0E0;
+                border: 2px solid #BDBDBD;
+                border-radius: 8px;
+                color: #424242;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #D5D5D5;
+                border: 2px solid #9E9E9E;
+            }
+            QPushButton:pressed {
+                background-color: #BDBDBD;
+                border: 2px solid #757575;
+            }
+        """)
+        self.cancel_button.clicked.connect(self.cancel_compression)
+        self.cancel_button.setVisible(False)  # 初始隐藏
+        bottom_layout.addWidget(self.cancel_button)
+        
         layout.addLayout(bottom_layout)
         
         # 调整对话框的初始高度
@@ -454,30 +480,6 @@ class CreateArchiveDialog(QDialog):
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setStyleSheet("font-size: 10px; color: #666666;")
         layout.addWidget(self.status_label)
-        
-        # 添加取消按钮
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        
-        # 取消按钮
-        self.cancel_button = QPushButton("取消压缩")
-        self.cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #F44336;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #D32F2F;
-            }
-        """)
-        self.cancel_button.clicked.connect(self.cancel_compression)
-        button_layout.addWidget(self.cancel_button)
-        
-        layout.addLayout(button_layout)
         
         self.progress_frame = frame
         return frame
@@ -690,7 +692,10 @@ class CreateArchiveDialog(QDialog):
             
             # 更新界面状态
             self.progress_frame.setVisible(False)
-            self.create_button.setEnabled(True)
+            
+            # 恢复按钮状态：显示创建按钮，隐藏取消按钮
+            self.create_button.setVisible(True)
+            self.cancel_button.setVisible(False)
             
             # 调整窗口高度
             QTimer.singleShot(0, self.adjust_dialog_height)
@@ -768,13 +773,12 @@ class CreateArchiveDialog(QDialog):
         self.progress_bar.setValue(0)
         self.status_label.setText("准备开始...")
         
-
+        # 隐藏创建按钮，显示取消按钮
+        self.create_button.setVisible(False)
+        self.cancel_button.setVisible(True)
         
         # 动态调整窗口高度
         QTimer.singleShot(0, self.adjust_dialog_height)
-        
-        # 禁用界面
-        self.create_button.setEnabled(False)
         
         # 创建工作线程
         self.worker = CreateArchiveWorker(
@@ -899,9 +903,10 @@ class CreateArchiveDialog(QDialog):
     def on_create_finished(self, success, message):
         """创建完成"""
         self.progress_frame.setVisible(False)
-        self.create_button.setEnabled(True)
         
-
+        # 恢复按钮状态：显示创建按钮，隐藏取消按钮
+        self.create_button.setVisible(True)
+        self.cancel_button.setVisible(False)
         
         # 动态调整窗口高度
         QTimer.singleShot(0, self.adjust_dialog_height)
