@@ -118,6 +118,11 @@ class CreateArchiveWorker(QThread):
     def cancel(self):
         """取消压缩任务"""
         self._is_cancelled = True
+        self.requestInterruption()  # 请求线程中断
+        
+    def is_cancelled(self):
+        """检查是否被取消或中断"""
+        return self._is_cancelled or self.isInterruptionRequested()
         
     def run(self):
         """执行压缩任务"""
@@ -126,13 +131,13 @@ class CreateArchiveWorker(QThread):
             self.progress.emit(0)
             
             # 检查是否已取消
-            if self._is_cancelled:
+            if self.is_cancelled():
                 self.finished.emit(False, "压缩任务已取消")
                 return
             
             # 定义进度回调函数
             def progress_callback(progress, status_text):
-                if self._is_cancelled:
+                if self.is_cancelled():
                     raise Exception("压缩任务已取消")
                 self.progress.emit(progress)
                 self.status.emit(status_text)
@@ -148,7 +153,7 @@ class CreateArchiveWorker(QThread):
             
             if success:
                 # 检查是否已取消
-                if self._is_cancelled:
+                if self.is_cancelled():
                     self.finished.emit(False, "压缩任务已取消")
                     return
                     
@@ -159,7 +164,7 @@ class CreateArchiveWorker(QThread):
                     try:
                         import shutil
                         for file_path in self.files:
-                            if self._is_cancelled:
+                            if self.is_cancelled():
                                 self.finished.emit(False, "压缩任务已取消")
                                 return
                             if os.path.exists(file_path):
@@ -181,7 +186,7 @@ class CreateArchiveWorker(QThread):
                 self.finished.emit(False, "创建压缩包失败")
                 
         except Exception as e:
-            if "压缩任务已取消" in str(e) or self._is_cancelled:
+            if "压缩任务已取消" in str(e) or self.is_cancelled():
                 self.finished.emit(False, "压缩任务已取消")
             else:
                 self.finished.emit(False, f"创建压缩包时发生错误：{str(e)}")
@@ -197,6 +202,7 @@ class CreateArchiveDialog(QDialog):
         self.selected_files = []
         self.worker = None
         self.is_background_mode = False
+        self._background_task_started = False
         
         # 获取配置管理器
         self.config_manager = get_config_manager(parent)
@@ -224,7 +230,7 @@ class CreateArchiveDialog(QDialog):
             current_dir = os.path.dirname(os.path.abspath(__file__))
             # 从 src/gudazip/ui/ 上升到项目根目录
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-            icon_path = os.path.join(project_root, "resources", "icons", "gudazip.ico")
+            icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except Exception:
@@ -789,7 +795,56 @@ class CreateArchiveDialog(QDialog):
         self.worker.start()
         
     def submit_background_task(self, archive_path, compression_level, password, delete_source):
-        """提交后台压缩任务"""
+        """提交后台压缩任务到独立进程"""
+        from ..core.task_launcher import get_task_launcher
+        
+        # 获取任务启动器
+        task_launcher = get_task_launcher()
+        
+        # 启动独立的压缩任务进程
+        success = task_launcher.launch_compress_task(
+            source_files=self.selected_files,
+            target_path=archive_path,
+            compression_level=compression_level,
+            password=password,
+            delete_source=delete_source
+        )
+        
+        if success:
+            # 设置后台任务启动标志
+            self._background_task_started = True
+            # 创建消息框并设置图标
+            msg_box = QMessageBox()
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setWindowTitle("后台任务")
+            msg_box.setText(
+                "压缩任务已启动独立进程运行，即使关闭主程序也会继续执行。\n\n"
+                "您可以通过系统托盘查看任务进度。"
+            )
+            msg_box.setStandardButtons(QMessageBox.Ok)
+            
+            # 设置窗口图标
+            try:
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+                icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
+                if os.path.exists(icon_path):
+                    msg_box.setWindowIcon(QIcon(icon_path))
+            except Exception:
+                pass
+            
+            msg_box.exec()
+            self.accept()
+        else:
+            # 启动失败，回退到原有的后台任务管理器
+            QMessageBox.warning(
+                self, "启动失败", 
+                "无法启动独立后台进程，将使用内置后台任务管理器。"
+            )
+            self._submit_to_internal_task_manager(archive_path, compression_level, password, delete_source)
+            
+    def _submit_to_internal_task_manager(self, archive_path, compression_level, password, delete_source):
+        """提交到内置后台任务管理器（回退方案）"""
         from .background_task_manager import get_background_task_manager
         import uuid
         
@@ -817,8 +872,24 @@ class CreateArchiveDialog(QDialog):
         # 启动工作线程
         worker.start()
         
-        # 关闭对话框
-        QMessageBox.information(self, "后台任务", "压缩任务已提交到后台运行，您可以关闭此窗口。")
+        # 创建消息框并设置图标
+        msg_box = QMessageBox()
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setWindowTitle("后台任务")
+        msg_box.setText("压缩任务已提交到后台运行，您可以关闭此窗口。")
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        
+        # 设置窗口图标
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
+            if os.path.exists(icon_path):
+                msg_box.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
+        
+        msg_box.exec()
         self.accept()
         
     def on_progress_updated(self, value):
@@ -889,4 +960,4 @@ class CreateArchiveDialog(QDialog):
             current_height += 50
         
         # 设置新的高度
-        self.resize(450, current_height) 
+        self.resize(450, current_height)

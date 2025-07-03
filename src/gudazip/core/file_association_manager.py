@@ -77,11 +77,11 @@ class FileAssociationManager:
             # 正确计算图标路径
             if getattr(sys, 'frozen', False):
                 # 如果是打包的exe，图标在同目录下
-                icon_path = os.path.join(os.path.dirname(sys.executable), "resources", "icons", "gudazip.ico")
+                icon_path = os.path.join(os.path.dirname(sys.executable), "resources", "icons", "app.ico")
             else:
                 # 如果是Python脚本，从项目根目录获取图标
                 script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-                icon_path = os.path.join(script_dir, "resources", "icons", "gudazip.ico")
+                icon_path = os.path.join(script_dir, "resources", "icons", "app.ico")
             
             success_count = 0
             details = {}
@@ -241,11 +241,11 @@ class FileAssociationManager:
             # 正确计算图标路径
             if getattr(sys, 'frozen', False):
                 # 如果是打包的exe，图标在同目录下
-                icon_path = os.path.join(os.path.dirname(sys.executable), "resources", "icons", "gudazip.ico")
+                icon_path = os.path.join(os.path.dirname(sys.executable), "resources", "icons", "app.ico")
             else:
                 # 如果是Python脚本，从项目根目录获取图标
                 script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-                icon_path = os.path.join(script_dir, "resources", "icons", "gudazip.ico")
+                icon_path = os.path.join(script_dir, "resources", "icons", "app.ico")
             
             success_count = 0
             total_operations = 0
@@ -539,4 +539,4 @@ class FileAssociationManager:
                 "message": f"清理桌面空白处右键菜单失败：{str(e)}",
                 "error": str(e)
             })
-            return result 
+            return result

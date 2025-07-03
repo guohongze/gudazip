@@ -108,7 +108,7 @@ def main():
         
         # 设置应用程序图标
         try:
-            icon_path = os.path.join(os.path.dirname(__file__), "resources", "icons", "app_icon.png")
+            icon_path = os.path.join(os.path.dirname(__file__), "resources", "icons", "app.ico")
             if os.path.exists(icon_path):
                 app.setWindowIcon(QIcon(icon_path))
         except Exception as e:
@@ -178,7 +178,11 @@ def main():
         # 处理右键菜单命令 - 不显示主窗口
         if context_menu_action and target_file:
             try:
-                handle_context_menu_action(window, context_menu_action, target_file)
+                result = handle_context_menu_action(window, context_menu_action, target_file)
+                # 如果启动了独立任务，等待一段时间确保任务进程正常启动
+                if result == 'background_task_started':
+                    import time
+                    time.sleep(2)  # 等待2秒确保独立任务进程启动
                 # 右键菜单操作完成后，如果没有其他需要，直接退出
                 return 0
             except Exception as e:
@@ -209,43 +213,87 @@ def main():
 
 def handle_context_menu_action(window, action, target_file):
     """处理右键菜单操作"""
+    from PySide6.QtWidgets import QDialog
     from gudazip.ui.create_archive_dialog import CreateArchiveDialog
     from gudazip.ui.extract_archive_dialog import ExtractArchiveDialog
     
     if action == '--add':
-        # 使用Gudazip压缩 - 弹出创建压缩包对话框
-        # 获取文件的目录和基本名称（去掉扩展名）
-        file_dir = os.path.dirname(target_file)
-        file_base = os.path.splitext(os.path.basename(target_file))[0]
-        
-        # 如果是文件夹，使用文件夹名称
-        if os.path.isdir(target_file):
-            file_base = os.path.basename(target_file)
-        
-        # 生成默认的压缩包路径（使用.zip作为默认格式）
-        default_archive_path = os.path.join(file_dir, f"{file_base}.zip")
-        
-        dialog = CreateArchiveDialog(window.archive_manager, default_archive_path, window)
-        dialog.selected_files.append(target_file)
-        dialog.update_ui_state()
-        dialog.exec()
+        # 弹出创建压缩包对话框
+        try:
+            dialog = CreateArchiveDialog(window.archive_manager)
+            
+            # 设置源文件/文件夹
+            dialog.selected_files = [target_file]
+            
+            # 设置默认输出路径
+            file_dir = os.path.dirname(target_file)
+            file_base = os.path.splitext(os.path.basename(target_file))[0]
+            if os.path.isdir(target_file):
+                file_base = os.path.basename(target_file)
+            default_archive_path = os.path.join(file_dir, f"{file_base}.zip")
+            dialog.path_edit.setText(default_archive_path)
+            
+            # 更新UI状态以启用创建按钮
+            dialog.update_ui_state()
+            
+            # 显示对话框
+            result = dialog.exec()
+            
+            if result == QDialog.Accepted:
+                # 检查是否启动了后台任务
+                if hasattr(dialog, '_background_task_started') and dialog._background_task_started:
+                    print(f"✅ 已启动后台压缩任务")
+                    return 'background_task_started'
+                else:
+                    print(f"✅ 压缩任务已完成")
+                    return 'completed'
+            else:
+                print("用户取消了压缩操作")
+                return 'cancelled'
+                
+        except Exception as e:
+            print(f"❌ 处理压缩对话框异常: {e}")
+            return 'failed'
         
     elif action == '--extract-dialog':
-        # 使用Gudazip解压 - 弹出解压对话框
-        if window.archive_manager.is_archive_file(target_file):
-            dialog = ExtractArchiveDialog(
-                archive_manager=window.archive_manager,
-                archive_path=target_file,
-                selected_files=None,
-                parent=window
-            )
-            dialog.exec()
-        else:
-            QMessageBox.warning(None, "错误", "选择的文件不是有效的压缩包")
+        # 弹出解压对话框
+        try:
+            if window.archive_manager.is_archive_file(target_file):
+                dialog = ExtractArchiveDialog(window.archive_manager, target_file)
+                
+                # 设置默认解压目录
+                file_dir = os.path.dirname(target_file)
+                file_base = os.path.splitext(os.path.basename(target_file))[0]
+                extract_dir = os.path.join(file_dir, file_base)
+                dialog.target_edit.setText(extract_dir)
+                
+                # 显示对话框
+                result = dialog.exec()
+                
+                if result == QDialog.Accepted:
+                    # 检查是否启动了后台任务
+                    if hasattr(dialog, '_background_task_started') and dialog._background_task_started:
+                        print(f"✅ 已启动后台解压任务")
+                        return 'background_task_started'
+                    else:
+                        print(f"✅ 解压任务已完成")
+                        return 'completed'
+                else:
+                    print("用户取消了解压操作")
+                    return 'cancelled'
+            else:
+                print(f"❌ 选择的文件不是有效的压缩包: {target_file}")
+                return 'failed'
+                
+        except Exception as e:
+            print(f"❌ 处理解压对话框异常: {e}")
+            return 'failed'
+    
+    return 'completed'
 
 
 
 
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    sys.exit(main())

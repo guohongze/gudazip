@@ -176,7 +176,21 @@ class HelpDialog(QDialog):
         
         # 图标
         icon_label = QLabel()
-        icon_label.setPixmap(qta.icon('fa5s.file-archive', color='#2e7d32').pixmap(64, 64))
+        try:
+            # 使用app.ico作为关于对话框的图标
+            import os
+            # 从当前文件位置计算正确的图标路径
+            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            icon_path = os.path.join(current_dir, "resources", "icons", "app.ico")
+            icon_path = os.path.abspath(icon_path)
+            if os.path.exists(icon_path):
+                icon_label.setPixmap(QIcon(icon_path).pixmap(64, 64))
+            else:
+                # 备用图标
+                icon_label.setPixmap(qta.icon('fa5s.file-archive', color='#2e7d32').pixmap(64, 64))
+        except Exception:
+            # 备用图标
+            icon_label.setPixmap(qta.icon('fa5s.file-archive', color='#2e7d32').pixmap(64, 64))
         icon_label.setAlignment(Qt.AlignCenter)
         info_layout.addWidget(icon_label)
         
@@ -193,4 +207,4 @@ class HelpDialog(QDialog):
         
         layout.addLayout(info_layout)
         
-        self.tab_widget.addTab(tab, "ℹ️ 关于") 
+        self.tab_widget.addTab(tab, "ℹ️ 关于")

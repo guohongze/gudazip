@@ -10,8 +10,9 @@ from PySide6.QtWidgets import (
     QStatusBar, QLabel, QTabWidget, QPushButton, QFileDialog,
     QMessageBox, QFileSystemModel, QDialog
 )
-from PySide6.QtCore import Qt, QDir, QUrl, QSize
+from PySide6.QtCore import Qt, QDir, QUrl, QSize, QTimer
 from PySide6.QtGui import QAction, QIcon, QStandardItemModel, QStandardItem, QFont
+from PySide6.QtWidgets import QApplication
 import os
 import qtawesome as qta
 import subprocess
@@ -38,6 +39,11 @@ class MainWindow(QMainWindow):
         self.state_manager = get_state_manager(self)
         self.config_manager = get_config_manager(self)
         
+        # 初始化后台任务管理器
+        from .ui.background_task_manager import get_background_task_manager
+        self.background_task_manager = get_background_task_manager()
+        print("后台任务管理器已初始化")
+        
         self.init_ui()
         self.setup_actions()
         self.setup_menus()
@@ -53,10 +59,35 @@ class MainWindow(QMainWindow):
         # 添加刷新动作到主窗口，使F5快捷键在整个窗口中生效
         self.addAction(self.action_refresh)
         
+    def showEvent(self, event):
+        """窗口显示事件 - 强制刷新任务栏图标"""
+        super().showEvent(event)
+        # 延迟刷新图标，确保窗口完全显示后再设置
+        QTimer.singleShot(100, self.force_refresh_taskbar_icon)
+        
+    def force_refresh_taskbar_icon(self):
+        """强制刷新任务栏图标"""
+        try:
+            # 重新设置窗口图标
+            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            icon_path = os.path.join(current_dir, "resources", "icons", "app.ico")
+            
+            if os.path.exists(icon_path):
+                icon = QIcon(icon_path)
+                # 设置窗口图标
+                self.setWindowIcon(icon)
+                # 设置应用程序图标（影响任务栏）
+                QApplication.instance().setWindowIcon(icon)
+                # 强制刷新窗口
+                self.update()
+        except Exception as e:
+            print(f"强制刷新任务栏图标失败: {e}")
+        
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("GudaZip - 压缩包管理工具")
-        self.setWindowIcon(QIcon("assets/icon.png"))
+        # 设置窗口图标
+        self.set_window_icon()
         
         # 应用外观配置
         self.apply_appearance_config()
@@ -484,7 +515,7 @@ class MainWindow(QMainWindow):
         try:
             # 获取图标路径
             current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            icon_path = os.path.join(current_dir, "resources", "icons", "app_icon.png")
+            icon_path = os.path.join(current_dir, "resources", "icons", "app.ico")
             
             # 检查图标文件是否存在
             if os.path.exists(icon_path):
@@ -772,6 +803,13 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """窗口关闭事件"""
         try:
+            # 清理后台任务管理器
+            from .ui.background_task_manager import get_background_task_manager
+            task_manager = get_background_task_manager()
+            if task_manager:
+                print("正在清理后台任务管理器...")
+                task_manager.cleanup()
+            
             # 保存窗口状态
             self.save_window_state()
             

@@ -66,21 +66,22 @@ class BackgroundTaskManager(QObject):
     def setup_system_tray(self):
         """设置系统托盘"""
         if not QSystemTrayIcon.isSystemTrayAvailable():
-            print("系统托盘不可用")
+            print("系统托盘不可用，后台任务管理器将在无托盘模式下运行")
+            self.tray_icon = None
             return
             
         # 创建托盘图标
         self.tray_icon = QSystemTrayIcon(self)
         
-        # 使用 GudaZip 的 ico 图标
+        # 使用 app.ico 图标
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-            icon_path = os.path.join(project_root, "resources", "icons", "gudazip.ico")
+            icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
             
             if os.path.exists(icon_path):
                 self.tray_icon.setIcon(QIcon(icon_path))
-                print(f"后台任务管理器使用 GudaZip 图标: {icon_path}")
+                print(f"后台任务管理器使用 app.ico 图标: {icon_path}")
             else:
                 print(f"图标文件不存在: {icon_path}")
                 
@@ -168,12 +169,16 @@ class BackgroundTaskManager(QObject):
             self.update_tray_tooltip()
             
             # 显示开始通知
-            self.tray_icon.showMessage(
-                "GudaZip - 后台任务",
-                f"开始{task_type}: {task_name}",
-                QSystemTrayIcon.Information,
-                5000
-            )
+            try:
+                self.show_task_start_notification(task_name, task_type)
+            except Exception:
+                # 回退到系统托盘通知
+                self.tray_icon.showMessage(
+                    "GudaZip - 后台任务",
+                    f"开始{task_type}: {task_name}",
+                    QSystemTrayIcon.Information,
+                    5000
+                )
         
         print(f"添加后台任务: {task_name}")
         
@@ -226,37 +231,54 @@ class BackgroundTaskManager(QObject):
         
         # 显示完成通知
         if self.tray_icon:
-            if success:
-                self.tray_icon.showMessage(
-                    "GudaZip - 任务完成",
-                    f"{task_info.name} 完成！双击查看详情。",
-                    QSystemTrayIcon.Information,
-                    10000
-                )
-            else:
-                self.tray_icon.showMessage(
-                    "GudaZip - 任务失败",
-                    f"{task_info.name} 失败！双击查看详情。",
-                    QSystemTrayIcon.Critical,
-                    10000
-                )
+            # 尝试使用Windows原生通知（如果可用）
+            try:
+                self.show_windows_notification(task_info.name, success, message)
+            except Exception:
+                # 回退到系统托盘通知
+                if success:
+                    self.tray_icon.showMessage(
+                        "GudaZip - 任务完成",
+                        f"{task_info.name} 完成！双击查看详情。",
+                        QSystemTrayIcon.Information,
+                        10000
+                    )
+                else:
+                    self.tray_icon.showMessage(
+                        "GudaZip - 任务失败",
+                        f"{task_info.name} 失败！双击查看详情。",
+                        QSystemTrayIcon.Critical,
+                        10000
+                    )
         
         # 显示弹窗提示（更明显的通知）
         from PySide6.QtWidgets import QMessageBox
+        
+        # 创建消息框并设置图标
+        msg_box = QMessageBox()
+        
+        # 设置窗口图标
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
+            if os.path.exists(icon_path):
+                msg_box.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
+        
         if success:
-            QMessageBox.information(
-                None, 
-                "GudaZip - 任务完成", 
-                f"后台任务已成功完成！\n\n任务：{task_info.name}\n类型：{task_info.task_type}\n\n{message}",
-                QMessageBox.Ok
-            )
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setWindowTitle("GudaZip - 任务完成")
+            msg_box.setText(f"后台任务已成功完成！\n\n任务：{task_info.name}\n类型：{task_info.task_type}\n\n{message}")
+            msg_box.setStandardButtons(QMessageBox.Ok)
+            msg_box.exec()
         else:
-            QMessageBox.warning(
-                None, 
-                "GudaZip - 任务失败", 
-                f"后台任务执行失败！\n\n任务：{task_info.name}\n类型：{task_info.task_type}\n\n错误信息：{message}",
-                QMessageBox.Ok
-            )
+            msg_box.setIcon(QMessageBox.Warning)
+            msg_box.setWindowTitle("GudaZip - 任务失败")
+            msg_box.setText(f"后台任务执行失败！\n\n任务：{task_info.name}\n类型：{task_info.task_type}\n\n错误信息：{message}")
+            msg_box.setStandardButtons(QMessageBox.Ok)
+            msg_box.exec()
         
         # 从活动任务中移除
         del self.active_tasks[task_id]
@@ -271,35 +293,197 @@ class BackgroundTaskManager(QObject):
             
         print(f"任务完成: {task_info.name}, 成功: {success}")
         
+    def show_windows_notification(self, task_name, success, message):
+        """显示Windows原生通知"""
+        try:
+            # 尝试使用Windows 10/11的原生通知
+            import platform
+            if platform.system() == "Windows":
+                try:
+                    # 使用plyer库显示通知（如果可用）
+                    from plyer import notification
+                    
+                    # 获取图标路径
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+                    icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
+                    
+                    if success:
+                        notification.notify(
+                            title="GudaZip - 任务完成",
+                            message=f"{task_name} 完成！\n{message}",
+                            app_icon=icon_path if os.path.exists(icon_path) else None,
+                            timeout=10
+                        )
+                    else:
+                        notification.notify(
+                            title="GudaZip - 任务失败",
+                            message=f"{task_name} 失败！\n错误：{message}",
+                            app_icon=icon_path if os.path.exists(icon_path) else None,
+                            timeout=10
+                        )
+                    return True
+                except ImportError:
+                    # plyer不可用，尝试使用win10toast
+                    try:
+                        from win10toast import ToastNotifier
+                        toaster = ToastNotifier()
+                        
+                        # 获取图标路径
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+                        icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
+                        
+                        if success:
+                            toaster.show_toast(
+                                "GudaZip - 任务完成",
+                                f"{task_name} 完成！\n{message}",
+                                icon_path=icon_path if os.path.exists(icon_path) else None,
+                                duration=10
+                            )
+                        else:
+                            toaster.show_toast(
+                                "GudaZip - 任务失败",
+                                f"{task_name} 失败！\n错误：{message}",
+                                icon_path=icon_path if os.path.exists(icon_path) else None,
+                                duration=10
+                            )
+                        return True
+                    except ImportError:
+                        pass
+        except Exception as e:
+            print(f"Windows原生通知失败: {e}")
+        
+        # 如果所有方法都失败，抛出异常让调用者使用回退方案
+        raise Exception("Windows原生通知不可用")
+    
+    def show_task_start_notification(self, task_name, task_type):
+        """显示任务开始的Windows原生通知"""
+        try:
+            # 尝试使用Windows 10/11的原生通知
+            import platform
+            if platform.system() == "Windows":
+                try:
+                    # 使用plyer库显示通知（如果可用）
+                    from plyer import notification
+                    
+                    # 获取图标路径
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+                    icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
+                    
+                    notification.notify(
+                        title="GudaZip - 后台任务",
+                        message=f"开始{task_type}: {task_name}",
+                        app_icon=icon_path if os.path.exists(icon_path) else None,
+                        timeout=5
+                    )
+                    return True
+                except ImportError:
+                    # plyer不可用，尝试使用win10toast
+                    try:
+                        from win10toast import ToastNotifier
+                        toaster = ToastNotifier()
+                        
+                        # 获取图标路径
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+                        icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
+                        
+                        toaster.show_toast(
+                            "GudaZip - 后台任务",
+                            f"开始{task_type}: {task_name}",
+                            icon_path=icon_path if os.path.exists(icon_path) else None,
+                            duration=5
+                        )
+                        return True
+                    except ImportError:
+                        pass
+        except Exception as e:
+            print(f"Windows原生通知失败: {e}")
+        
+        # 如果所有方法都失败，抛出异常让调用者使用回退方案
+        raise Exception("Windows原生通知不可用")
+    
     def hide_tray_if_no_tasks(self):
         """如果没有活动任务，隐藏托盘图标"""
         if not self.active_tasks and self.tray_icon:
             self.tray_icon.hide()
+            print("所有后台任务已完成，隐藏托盘图标")
             
     def cancel_task(self, task_id):
         """取消任务"""
         if task_id in self.active_tasks:
             task_info = self.active_tasks[task_id]
             if task_info.worker and task_info.worker.isRunning():
-                task_info.worker.terminate()
-                task_info.worker.wait()
+                print(f"正在取消任务: {task_info.name}")
+                
+                # 尝试优雅地停止工作线程
+                try:
+                    # 检查工作线程是否有特定的停止方法
+                    if hasattr(task_info.worker, 'cancel'):
+                        task_info.worker.cancel()  # 压缩任务
+                    elif hasattr(task_info.worker, 'stop'):
+                        task_info.worker.stop()    # 解压任务
+                    else:
+                        task_info.worker.requestInterruption()  # 通用中断请求
+                    
+                    # 等待线程结束
+                    if not task_info.worker.wait(3000):  # 等待3秒
+                        print(f"任务 {task_info.name} 未能优雅停止，强制终止")
+                        task_info.worker.terminate()
+                        task_info.worker.wait(1000)
+                    else:
+                        print(f"任务 {task_info.name} 已成功取消")
+                except Exception as e:
+                    print(f"取消任务时出错: {e}")
+                    task_info.worker.terminate()
+                    task_info.worker.wait(1000)
+                    
             del self.active_tasks[task_id]
             self.update_tray_menu()
             self.update_tray_tooltip()
             
     def cleanup(self):
         """清理资源"""
+        print(f"开始清理 {len(self.active_tasks)} 个活动任务...")
+        
         # 终止所有活动任务
-        for task_info in self.active_tasks.values():
+        for task_id, task_info in list(self.active_tasks.items()):
             if task_info.worker and task_info.worker.isRunning():
-                task_info.worker.terminate()
-                task_info.worker.wait()
+                print(f"正在终止任务: {task_info.name}")
+                
+                try:
+                    # 首先尝试优雅地请求停止
+                    if hasattr(task_info.worker, 'cancel'):
+                        task_info.worker.cancel()  # 压缩任务
+                    elif hasattr(task_info.worker, 'stop'):
+                        task_info.worker.stop()    # 解压任务
+                    else:
+                        task_info.worker.requestInterruption()  # 通用中断请求
+                    
+                    # 等待一小段时间让线程自然结束
+                    if not task_info.worker.wait(1000):  # 等待1秒
+                        print(f"任务 {task_info.name} 未能优雅停止，强制终止")
+                        # 强制终止
+                        task_info.worker.terminate()
+                        # 再等待一段时间
+                        if not task_info.worker.wait(2000):  # 等待2秒
+                            print(f"警告: 任务 {task_info.name} 的线程可能仍在运行")
+                    else:
+                        print(f"任务 {task_info.name} 已优雅停止")
+                except Exception as e:
+                    print(f"清理任务时出错: {e}")
+                    task_info.worker.terminate()
+                    task_info.worker.wait(2000)
         
         self.active_tasks.clear()
+        print("所有任务已清理完成")
         
         # 隐藏托盘图标
         if self.tray_icon:
             self.tray_icon.hide()
+            print("托盘图标已隐藏")
 
 
 class TaskInfo:
@@ -335,7 +519,7 @@ class TaskManagerDialog(QDialog):
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-            icon_path = os.path.join(project_root, "resources", "icons", "gudazip.ico")
+            icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except Exception:
@@ -518,7 +702,7 @@ class TaskStatusDialog(QDialog):
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-            icon_path = os.path.join(project_root, "resources", "icons", "gudazip.ico")
+            icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except Exception:
@@ -689,7 +873,7 @@ class TaskResultDialog(QDialog):
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-            icon_path = os.path.join(project_root, "resources", "icons", "gudazip.ico")
+            icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except Exception:
@@ -727,4 +911,4 @@ def get_background_task_manager():
     global _background_task_manager
     if _background_task_manager is None:
         _background_task_manager = BackgroundTaskManager()
-    return _background_task_manager 
+    return _background_task_manager

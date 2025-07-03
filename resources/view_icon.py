@@ -26,7 +26,7 @@ class IconViewer(QMainWindow):
         
         # 设置窗口图标
         try:
-            icon_path = "icons/app_icon.png"
+            icon_path = "icons/app.ico"
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except:
@@ -167,4 +167,4 @@ def main():
     sys.exit(app.exec())
 
 if __name__ == "__main__":
-    main() 
+    main()

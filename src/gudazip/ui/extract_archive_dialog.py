@@ -76,25 +76,36 @@ class ExtractArchiveWorker(QThread):
         self.selected_files = selected_files
         self.stop_requested = False  # 停止请求标志
         
+    def stop(self):
+        """停止解压任务"""
+        self.stop_requested = True
+        self.requestInterruption()  # 请求线程中断
+        
+    def is_stopped(self):
+        """检查是否被停止或中断"""
+        return self.stop_requested or self.isInterruptionRequested()
+        
     def run(self):
         """执行解压任务"""
         try:
-            if self.stop_requested:
+            if self.is_stopped():
                 return
                 
             self.status.emit("正在解压压缩包...")
             self.progress.emit(0)
             
             # 检查是否被请求停止
-            if self.stop_requested:
+            if self.is_stopped():
                 self.finished.emit(False, "解压被用户取消")
                 return
             
             # 定义进度回调函数
             def progress_callback(progress, status_text):
-                if not self.stop_requested:
+                if not self.is_stopped():
                     self.progress.emit(progress)
                     self.status.emit(status_text)
+                else:
+                    raise Exception("解压任务已取消")
             
             # 解压压缩包
             success = self.archive_manager.extract_archive(
@@ -106,7 +117,7 @@ class ExtractArchiveWorker(QThread):
             )
             
             # 再次检查是否被请求停止
-            if self.stop_requested:
+            if self.is_stopped():
                 self.finished.emit(False, "解压被用户取消")
                 return
             
@@ -129,7 +140,9 @@ class ExtractArchiveWorker(QThread):
                 self.finished.emit(False, "解压失败")
                 
         except Exception as e:
-            if not self.stop_requested:
+            if "解压任务已取消" in str(e) or self.is_stopped():
+                self.finished.emit(False, "解压被用户取消")
+            else:
                 self.finished.emit(False, f"解压时发生错误：{str(e)}")
 
 
@@ -144,6 +157,7 @@ class ExtractArchiveDialog(QDialog):
         self.archive_info = None
         self.worker = None
         self.is_background_mode = False
+        self._background_task_started = False
         
         # 获取压缩包信息
         try:
@@ -169,7 +183,7 @@ class ExtractArchiveDialog(QDialog):
             current_dir = os.path.dirname(os.path.abspath(__file__))
             # 从 src/gudazip/ui/ 上升到项目根目录
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-            icon_path = os.path.join(project_root, "resources", "icons", "gudazip.ico")
+            icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except Exception:
@@ -413,7 +427,54 @@ class ExtractArchiveDialog(QDialog):
         self.worker.start()
         
     def submit_background_task(self, extract_to, password):
-        """提交后台解压任务"""
+        """提交后台解压任务到独立进程"""
+        from ..core.task_launcher import get_task_launcher
+        
+        # 获取任务启动器
+        task_launcher = get_task_launcher()
+        
+        # 启动独立的解压任务进程
+        success = task_launcher.launch_extract_task(
+            archive_path=self.archive_path,
+            target_path=extract_to,
+            password=password
+        )
+        
+        if success:
+            # 设置后台任务启动标志
+            self._background_task_started = True
+            # 创建消息框并设置图标
+            msg_box = QMessageBox()
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setWindowTitle("后台任务")
+            msg_box.setText(
+                "解压任务已启动独立进程运行，即使关闭主程序也会继续执行。\n\n"
+                "您可以通过系统托盘查看任务进度。"
+            )
+            msg_box.setStandardButtons(QMessageBox.Ok)
+            
+            # 设置窗口图标
+            try:
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+                icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
+                if os.path.exists(icon_path):
+                    msg_box.setWindowIcon(QIcon(icon_path))
+            except Exception:
+                pass
+            
+            msg_box.exec()
+            self.accept()
+        else:
+            # 启动失败，回退到原有的后台任务管理器
+            QMessageBox.warning(
+                self, "启动失败", 
+                "无法启动独立后台进程，将使用内置后台任务管理器。"
+            )
+            self._submit_to_internal_task_manager(extract_to, password)
+            
+    def _submit_to_internal_task_manager(self, extract_to, password):
+        """提交到内置后台任务管理器（回退方案）"""
         from .background_task_manager import get_background_task_manager
         import uuid
         
@@ -440,8 +501,24 @@ class ExtractArchiveDialog(QDialog):
         # 启动工作线程
         worker.start()
         
-        # 关闭对话框
-        QMessageBox.information(self, "后台任务", "解压任务已提交到后台运行，您可以关闭此窗口。")
+        # 创建消息框并设置图标
+        msg_box = QMessageBox()
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setWindowTitle("后台任务")
+        msg_box.setText("解压任务已提交到后台运行，您可以关闭此窗口。")
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        
+        # 设置窗口图标
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            icon_path = os.path.join(project_root, "resources", "icons", "app.ico")
+            if os.path.exists(icon_path):
+                msg_box.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
+        
+        msg_box.exec()
         self.accept()
         
     def on_progress_updated(self, value):
@@ -514,15 +591,12 @@ class ExtractArchiveDialog(QDialog):
                 QMessageBox.No
             )
             if reply == QMessageBox.Yes:
-                # 设置标志通知工作线程停止
-                if hasattr(self.worker, 'stop_requested'):
-                    self.worker.stop_requested = True
+                # 请求工作线程停止
+                self.worker.stop()
                 
                 # 等待线程正常结束
-                self.worker.wait(3000)  # 等待3秒
-                
-                # 如果线程仍在运行，强制终止
-                if self.worker.isRunning():
+                if not self.worker.wait(3000):  # 等待3秒
+                    # 如果线程仍在运行，强制终止
                     self.worker.terminate()
                     self.worker.wait(1000)
                 
@@ -540,4 +614,4 @@ class ExtractArchiveDialog(QDialog):
             
 
                 
-        event.accept() 
+        event.accept()
