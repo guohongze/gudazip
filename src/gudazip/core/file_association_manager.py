@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QMessageBox
 # 导入安全的PyWin32注册表封装
 from .pywin32_registry import PyWin32Registry
 from .permission_manager import PermissionManager
+from .environment_manager import get_environment_manager
 
 class FileAssociationManager:
     """安全的文件关联管理器，使用PyWin32接口"""
@@ -31,18 +32,9 @@ class FileAssociationManager:
     
     @staticmethod
     def get_app_path() -> str:
-        """获取应用程序的实际路径"""
-        if getattr(sys, 'frozen', False):
-            # 如果是打包的exe
-            return sys.executable
-        else:
-            # 如果是Python脚本
-            script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-            main_py = os.path.join(script_dir, "main.py")
-            if os.path.exists(main_py):
-                return f'"{sys.executable}" "{main_py}"'
-            else:
-                return sys.executable
+        """获取应用程序的实际路径（使用环境变量）"""
+        env_manager = get_environment_manager()
+        return env_manager.get_app_executable_path()
     
     def is_admin(self) -> bool:
         """检查是否有管理员权限"""
@@ -71,17 +63,10 @@ class FileAssociationManager:
             return result
         
         try:
-            # 获取应用程序路径和图标
-            app_path = self.get_app_path()
-            
-            # 正确计算图标路径
-            if getattr(sys, 'frozen', False):
-                # 如果是打包的exe，图标在同目录下
-                icon_path = os.path.join(os.path.dirname(sys.executable), "resources", "icons", "app.ico")
-            else:
-                # 如果是Python脚本，从项目根目录获取图标
-                script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-                icon_path = os.path.join(script_dir, "resources", "icons", "app.ico")
+            # 获取应用程序路径和图标（使用环境变量）
+            env_manager = get_environment_manager()
+            app_path = env_manager.get_app_executable_path()
+            icon_path = env_manager.get_app_icon_path()
             
             success_count = 0
             details = {}
@@ -235,17 +220,10 @@ class FileAssociationManager:
             return result
         
         try:
-            # 获取应用程序路径
-            app_path = self.get_app_path()
-            
-            # 正确计算图标路径
-            if getattr(sys, 'frozen', False):
-                # 如果是打包的exe，图标在同目录下
-                icon_path = os.path.join(os.path.dirname(sys.executable), "resources", "icons", "app.ico")
-            else:
-                # 如果是Python脚本，从项目根目录获取图标
-                script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-                icon_path = os.path.join(script_dir, "resources", "icons", "app.ico")
+            # 获取应用程序路径和图标（使用环境变量）
+            env_manager = get_environment_manager()
+            app_path = env_manager.get_app_executable_path()
+            icon_path = env_manager.get_app_icon_path()
             
             success_count = 0
             total_operations = 0

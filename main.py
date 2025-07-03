@@ -13,10 +13,17 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QDialog, QVBoxLayout, Q
 from PySide6.QtCore import QCoreApplication, QTranslator, QLocale
 from PySide6.QtGui import QIcon
 
-# 添加src目录到Python路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# 添加模块路径到Python路径
+# 在开发环境中使用src目录，在打包后的exe中直接使用当前目录
+if getattr(sys, 'frozen', False):
+    # 打包后的exe环境
+    sys.path.insert(0, os.path.dirname(sys.executable))
+else:
+    # 开发环境
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from gudazip.main_window import MainWindow
+from gudazip.core.environment_manager import get_environment_manager
 
 
 def is_admin():
@@ -106,13 +113,14 @@ def main():
         if translator.load(locale, "gudazip", "_", "resources/translations"):
             app.installTranslator(translator)
         
-        # 设置应用程序图标
+        # 设置应用程序图标（使用环境变量）
         try:
-            icon_path = os.path.join(os.path.dirname(__file__), "resources", "icons", "app.ico")
+            env_manager = get_environment_manager()
+            icon_path = env_manager.get_app_icon_path()
             print(f"图标路径: {icon_path}")
-            print(f"图标文件存在: {os.path.exists(icon_path)}")
+            print(f"图标文件存在: {os.path.exists(icon_path) if icon_path else False}")
             
-            if os.path.exists(icon_path):
+            if icon_path and os.path.exists(icon_path):
                 icon = QIcon(icon_path)
                 print(f"图标对象创建成功: {not icon.isNull()}")
                 
