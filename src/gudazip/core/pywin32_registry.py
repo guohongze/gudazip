@@ -453,7 +453,7 @@ class PyWin32Registry:
                                                  menu_items: Dict[str, Dict[str, str]]) -> bool:
         """
         为普通文件和文件夹创建压缩相关的右键菜单
-        targets: ["*", "Directory", "Directory\\Background"]
+        targets: ["*", "Directory"]（不包括Directory\\Background）
         """
         if not self.available:
             return False

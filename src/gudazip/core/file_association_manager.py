@@ -217,6 +217,7 @@ class FileAssociationManager:
         """
         安全地安装右键菜单
         为普通文件/文件夹添加压缩功能，为压缩文件添加解压功能
+        不包含桌面空白处等系统对象
         """
         result = {
             "success": False,
@@ -253,9 +254,10 @@ class FileAssociationManager:
             compression_targets = []
             compression_menu_items = {}
             
-            # 为所有文件添加压缩选项 - 只保留一个统一的压缩功能
+            # 为所有文件和文件夹添加压缩选项，但不包括桌面空白处
             if menu_options.get("add", False) or menu_options.get("zip", False) or menu_options.get("7z", False):
-                compression_targets.extend(["*", "Directory", "Directory\\Background"])
+                # 只针对文件和文件夹，不包括Directory\\Background（桌面空白处）
+                compression_targets.extend(["*", "Directory"])
                 
                 # 统一的压缩菜单
                 compression_menu_items["compress"] = {
@@ -361,7 +363,7 @@ class FileAssociationManager:
             total_operations = 0
             
             # 1. 移除普通文件和文件夹的压缩菜单
-            compression_targets = ["*", "Directory", "Directory\\Background"]
+            compression_targets = ["*", "Directory"]
             compression_menu_ids = ["compress"]
             
             total_operations += len(compression_targets) * len(compression_menu_ids)
@@ -427,7 +429,7 @@ class FileAssociationManager:
         
         try:
             # 1. 检查普通文件和文件夹的压缩菜单
-            compression_targets = ["*", "Directory", "Directory\\Background"]
+            compression_targets = ["*", "Directory"]
             compression_menu_ids = ["compress"]
             
             for target in compression_targets:
@@ -479,4 +481,62 @@ class FileAssociationManager:
         for ext_status in status.values():
             if any(ext_status.values()):
                 return True
-        return False 
+        return False
+    
+    def clean_desktop_background_menu(self) -> Dict[str, any]:
+        """
+        清理桌面空白处的右键菜单
+        专门用于移除之前错误注册的Directory\\Background菜单
+        """
+        result = {
+            "success": False,
+            "message": "",
+            "details": {},
+            "success_count": 0,
+            "total_operations": 0
+        }
+        
+        if not self.registry.is_available():
+            status = self.registry.get_module_status()
+            missing_modules = status.get('missing_modules', [])
+            result["message"] = f"PyWin32基础模块不可用。缺失模块: {missing_modules}"
+            result["details"] = status
+            return result
+        
+        try:
+            success_count = 0
+            total_operations = 0
+            
+            # 清理Directory\\Background中的gudazip菜单
+            desktop_background_targets = ["Directory\\Background"]
+            menu_ids_to_remove = ["compress", "extract", "open"]
+            
+            total_operations += len(desktop_background_targets) * len(menu_ids_to_remove)
+            
+            if self.registry.remove_context_menu_for_files_and_folders(
+                desktop_background_targets, menu_ids_to_remove
+            ):
+                success_count += len(desktop_background_targets) * len(menu_ids_to_remove)
+                print("✅ 清理桌面空白处的右键菜单成功")
+            else:
+                print("❌ 清理桌面空白处的右键菜单失败")
+            
+            # 刷新Shell关联
+            self.registry.refresh_shell()
+            
+            result.update({
+                "success": True,
+                "message": f"桌面空白处右键菜单清理完成！共移除 {success_count} 个菜单项",
+                "success_count": success_count,
+                "total_operations": total_operations
+            })
+            
+            return result
+            
+        except Exception as e:
+            result.update({
+                "success": False,
+                "message": f"清理桌面空白处右键菜单失败：{str(e)}",
+                "error": str(e)
+            })
+            return result 

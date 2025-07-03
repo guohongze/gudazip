@@ -99,24 +99,88 @@ class ExtractHandler:
             bool: 是否成功处理解压请求
         """
         try:
-            # 寻找有效的压缩包文件
-            archive_path = self._find_valid_archive(file_paths, current_path)
-            
-            if not archive_path:
-                # 让用户手动选择压缩包
-                from PySide6.QtWidgets import QFileDialog
-                archive_path, _ = QFileDialog.getOpenFileName(
-                    self.parent_window, "选择要解压的压缩包", "",
-                    "压缩包文件 (*.zip *.rar *.7z *.tar *.gz *.bz2);;所有文件 (*.*)"
-                )
-                
-                if not archive_path:
+            # 检查是否有选中的文件
+            if not file_paths:
+                # 没有选择任何文件，检查当前路径是否为压缩包
+                if current_path and os.path.isfile(current_path) and self.archive_manager.is_archive_file(current_path):
+                    # 当前路径就是压缩包，直接解压
+                    archive_path = current_path
+                    extract_request = ExtractRequest(archive_path, None)
+                    return self._execute_extract_request(extract_request)
+                else:
+                    # 没有选择任何文件，也不在压缩包路径，提示用户选择文件
+                    QMessageBox.information(
+                        self.parent_window, 
+                        "提示", 
+                        "请先选择要解压的压缩包后再点击解压。\n\n"
+                    )
                     return False
             
-            # 验证压缩包
-            if not self.archive_manager.is_archive_file(archive_path):
-                QMessageBox.warning(self.parent_window, "警告", "选择的文件不是有效的压缩包")
+            # 检查选中的文件是否包含压缩包
+            archive_files = []
+            non_archive_files = []
+            
+            for file_path in file_paths:
+                if os.path.isfile(file_path):
+                    if self.archive_manager.is_archive_file(file_path):
+                        archive_files.append(file_path)
+                    else:
+                        non_archive_files.append(file_path)
+            
+            # 如果选中的文件中没有压缩包
+            if not archive_files:
+                if non_archive_files:
+                    # 选中的都是普通文件，给出友好提示
+                    file_names = [os.path.basename(f) for f in non_archive_files[:3]]  # 最多显示3个文件名
+                    file_display = "、".join(file_names)
+                    if len(non_archive_files) > 3:
+                        file_display += f" 等{len(non_archive_files)}个文件"
+                    
+                    QMessageBox.information(
+                        self.parent_window, 
+                        "提示", 
+                        f"选中的文件 \"{file_display}\" 不是压缩包文件，无法解压。\n\n"
+                    )
+                else:
+                    # 选中的是文件夹等其他类型
+                    QMessageBox.information(
+                        self.parent_window, 
+                        "提示", 
+                        "请选择压缩包文件进行解压操作。\n\n"
+                    )
                 return False
+            
+            # 如果选中了多个压缩包，询问用户选择哪一个
+            if len(archive_files) > 1:
+                from PySide6.QtWidgets import QInputDialog
+                
+                archive_names = [os.path.basename(f) for f in archive_files]
+                archive_name, ok = QInputDialog.getItem(
+                    self.parent_window,
+                    "选择压缩包", 
+                    f"您选择了 {len(archive_files)} 个压缩包，请选择要解压的压缩包：",
+                    archive_names,
+                    0,
+                    False
+                )
+                
+                if not ok:
+                    return False
+                
+                # 根据选择的名称找到对应的路径
+                selected_archive = None
+                for i, name in enumerate(archive_names):
+                    if name == archive_name:
+                        selected_archive = archive_files[i]
+                        break
+                
+                if not selected_archive:
+                    return False
+                    
+                archive_path = selected_archive
+            else:
+                # 只有一个压缩包
+                archive_path = archive_files[0]
             
             # 创建解压请求（文件系统模式总是解压整个压缩包）
             extract_request = ExtractRequest(archive_path, None)

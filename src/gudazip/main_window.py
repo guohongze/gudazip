@@ -448,7 +448,7 @@ class MainWindow(QMainWindow):
             if self.file_browser.archive_viewing_mode:
                 # 压缩包查看模式：解压选中的文件或整个压缩包
                 archive_path = self.file_browser.current_archive_path
-                current_view_path = getattr(self.file_browser, 'current_relative_path', '')
+                current_view_path = getattr(self.file_browser, 'archive_current_dir', '')
                 
                 success = extract_handler.extract_from_archive_view(
                     archive_path, 
