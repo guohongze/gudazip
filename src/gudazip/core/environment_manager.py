@@ -79,8 +79,14 @@ class EnvironmentManager:
             # 打包的exe
             return sys.executable
         else:
-            # 开发环境
+            # 开发环境 - 优先使用构建的exe文件
             install_path = self.get_install_path()
+            exe_path = os.path.join(install_path, "build", "exe", "GudaZip.exe")
+            if os.path.exists(exe_path):
+                # 如果存在构建的exe，优先使用（用于文件关联）
+                return exe_path
+            
+            # 否则回退到python脚本（用于开发调试）
             main_py = os.path.join(install_path, "main.py")
             if os.path.exists(main_py):
                 return f'"{sys.executable}" "{main_py}"'
