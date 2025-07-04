@@ -89,10 +89,19 @@ def create_custom_msi_script():
     <!-- 功能定义 -->
     <Feature Id="ProductFeature" Title="GudaZip" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
-      <ComponentRef Id="FileAssociations" />
       <ComponentRef Id="ContextMenus" />
       <ComponentRef Id="EnvironmentVariables" />
       <ComponentRef Id="UninstallComponent" />
+    </Feature>
+    
+    <!-- 文件关联功能（用户可选，默认启用） -->
+    <Feature Id="FileAssociationFeature" Title="文件关联" Description="将压缩文件格式关联到 GudaZip（推荐）" Level="1" Display="expand">
+      <Condition Level="1">SET_AS_DEFAULT="1"</Condition>
+      <Condition Level="0">SET_AS_DEFAULT&lt;&gt;"1"</Condition>
+      <ComponentRef Id="BasicFormats" />
+      <ComponentRef Id="TarFormats" />
+      <ComponentRef Id="CompressionFormats" />
+      <ComponentRef Id="OtherFormats" />
     </Feature>
     
     <!-- 目录结构 -->
@@ -131,15 +140,47 @@ def create_custom_msi_script():
                    System="no" />
     </Component>
     
-    <!-- 文件关联组件 -->
-    <Component Id="FileAssociations" Directory="INSTALLFOLDER" Guid="{11111111-2222-3333-4444-555555555555}">
-      <!-- ZIP文件关联 -->
+    <!-- 基础格式文件关联组件 -->
+    <Component Id="BasicFormats" Directory="INSTALLFOLDER" Guid="{11111111-2222-3333-4444-555555555555}">
       <RegistryValue Root="HKCU" Key="Software\\Classes\\.zip" Value="GudaZip.Archive" Type="string" />
       <RegistryValue Root="HKCU" Key="Software\\Classes\\.rar" Value="GudaZip.Archive" Type="string" />
       <RegistryValue Root="HKCU" Key="Software\\Classes\\.7z" Value="GudaZip.Archive" Type="string" />
       <RegistryValue Root="HKCU" Key="Software\\Classes\\GudaZip.Archive" Value="GudaZip压缩文件" Type="string" />
       <RegistryValue Root="HKCU" Key="Software\\Classes\\GudaZip.Archive\\DefaultIcon" Value="[INSTALLFOLDER]resources\\icons\\app.ico" Type="string" />
       <RegistryValue Root="HKCU" Key="Software\\Classes\\GudaZip.Archive\\shell\\open\\command" Value='"[INSTALLFOLDER]GudaZip.exe" "%1"' Type="string" KeyPath="yes" />
+    </Component>
+    
+    <!-- TAR系列格式文件关联组件 -->
+    <Component Id="TarFormats" Directory="INSTALLFOLDER" Guid="{11111111-2222-3333-4444-555555555556}">
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.tar" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.tgz" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.tar.gz" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.tbz" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.tbz2" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.tar.bz2" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.txz" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.tar.xz" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.taz" Value="GudaZip.Archive" Type="string" KeyPath="yes" />
+    </Component>
+    
+    <!-- 压缩格式文件关联组件 -->
+    <Component Id="CompressionFormats" Directory="INSTALLFOLDER" Guid="{11111111-2222-3333-4444-555555555557}">
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.gz" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.gzip" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.bz2" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.bzip2" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.xz" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.lzma" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.z" Value="GudaZip.Archive" Type="string" KeyPath="yes" />
+    </Component>
+    
+    <!-- 其他格式文件关联组件 -->
+    <Component Id="OtherFormats" Directory="INSTALLFOLDER" Guid="{11111111-2222-3333-4444-555555555558}">
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.cab" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.arj" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.lzh" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.cpio" Value="GudaZip.Archive" Type="string" />
+      <RegistryValue Root="HKCU" Key="Software\\Classes\\.iso" Value="GudaZip.Archive" Type="string" KeyPath="yes" />
     </Component>
     
     <!-- 右键菜单组件 -->
@@ -158,9 +199,35 @@ def create_custom_msi_script():
       <Environment Id="RemoveGudaZipIconsPath" Name="GUDAZIP_ICONS_PATH" Action="remove" System="no" />
       
       <!-- 卸载时清理注册表 -->
+      <!-- 基础格式 -->
       <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.zip" Action="removeOnUninstall" />
       <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.rar" Action="removeOnUninstall" />
       <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.7z" Action="removeOnUninstall" />
+      <!-- TAR系列格式 -->
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.tar" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.tgz" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.tar.gz" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.tbz" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.tbz2" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.tar.bz2" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.txz" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.tar.xz" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.taz" Action="removeOnUninstall" />
+      <!-- 压缩格式 -->
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.gz" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.gzip" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.bz2" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.bzip2" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.xz" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.lzma" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.z" Action="removeOnUninstall" />
+      <!-- 其他格式 -->
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.cab" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.arj" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.lzh" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.cpio" Action="removeOnUninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\.iso" Action="removeOnUninstall" />
+      <!-- 通用清理 -->
       <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\GudaZip.Archive" Action="removeOnUninstall" />
       <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\*\\shell\\GudaZip.Compress" Action="removeOnUninstall" />
       <RemoveRegistryKey Root="HKCU" Key="Software\\Classes\\Directory\\shell\\GudaZip.Compress" Action="removeOnUninstall" />
@@ -201,11 +268,33 @@ def create_custom_msi_script():
     
     <!-- 安装UI -->
     <UI>
-      <UIRef Id="WixUI_InstallDir" />
-      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2">1</Publish>
-      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">1</Publish>
+      <UIRef Id="WixUI_FeatureTree" />
+      
+      <!-- 自定义文件关联选择对话框 -->
+      <Dialog Id="FileAssociationDlg" Width="370" Height="270" Title="文件关联设置">
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="选择要关联的文件类型" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="GudaZip 可以关联以下压缩文件格式，使其默认用 GudaZip 打开：" />
+        
+        <Control Id="SetAsDefaultCheck" Type="CheckBox" X="25" Y="50" Width="280" Height="17" Property="SET_AS_DEFAULT" CheckBoxValue="1" Text="设置 GudaZip 为默认压缩程序（推荐）" />
+        
+        <Control Id="SupportedFormatsText" Type="Text" X="25" Y="75" Width="280" Height="60" Transparent="yes" NoPrefix="yes" Text="支持的格式包括：&#xD;&#xA;• 基础格式：ZIP, RAR, 7Z&#xD;&#xA;• TAR系列：TAR, TGZ, TBZ, TXZ 等&#xD;&#xA;• 压缩格式：GZ, BZ2, XZ, LZMA 等&#xD;&#xA;• 其他格式：CAB, ARJ, LZH, CPIO, ISO" />
+        
+        <Control Id="WarningText" Type="Text" X="25" Y="145" Width="280" Height="30" Transparent="yes" NoPrefix="yes" Text="注意：如果取消勾选，您仍可以在安装后通过程序设置手动关联文件类型。" />
+        
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="上一步" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="下一步" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="取消" />
+      </Dialog>
+      
+      <!-- 对话框导航 -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="FileAssociationDlg">LicenseAccepted = "1"</Publish>
+      <Publish Dialog="FileAssociationDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
+      <Publish Dialog="FileAssociationDlg" Control="Next" Event="NewDialog" Value="CustomizeDlg">1</Publish>
+      <Publish Dialog="CustomizeDlg" Control="Back" Event="NewDialog" Value="FileAssociationDlg">1</Publish>
     </UI>
     
+    <!-- 属性定义 -->
+    <Property Id="SET_AS_DEFAULT" Value="1" />
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     
     <!-- 许可协议 -->
