@@ -60,7 +60,7 @@ class HelpDialog(QDialog):
         <div style="font-size: 14px;">
         <h3 style="font-size: 16px;">GudaZip 使用说明</h3>
         
-        <h4 style="font-size: 14px;">🔧 主要功能</h4>
+        <h4 style="font-size: 16px;">🔧 主要功能</h4>
         <ul>
             <li><b>创建压缩包：</b> 选择文件或文件夹，点击"添加"按钮创建新的压缩包</li>
             <li><b>解压文件：</b> 选择压缩包，点击"解压到"按钮解压文件</li>
@@ -68,14 +68,14 @@ class HelpDialog(QDialog):
             <li><b>程序设置：</b> 点击"设置"按钮调整程序选项</li>
         </ul>
         
-        <h4 style="font-size: 14px;">📁 文件操作</h4>
+        <h4 style="font-size: 16px;">📁 文件操作</h4>
         <ul>
             <li><b>双击文件：</b> 根据设置执行打开、选择或预览操作</li>
             <li><b>多选文件：</b> 按住Ctrl键点击多个文件进行批量操作</li>
             <li><b>返回上级：</b> 在压缩包浏览模式下，点击"返回文件系统"按钮</li>
         </ul>
         
-        <h4 style="font-size: 14px;">⚙️ 快捷键</h4>
+        <h4 style="font-size: 16px;">⚙️ 快捷键</h4>
         <ul>
             <li><b>Ctrl+N：</b> 创建新压缩包</li>
             <li><b>Ctrl+O：</b> 打开压缩包</li>
@@ -84,7 +84,7 @@ class HelpDialog(QDialog):
             <li><b>F5：</b> 刷新当前视图</li>
         </ul>
         
-        <h4 style="font-size: 14px;">💡 使用技巧</h4>
+        <h4 style="font-size: 16px;">💡 使用技巧</h4>
         <ul>
             <li>支持拖拽操作，可以将文件拖到程序中快速处理</li>
             <li>在压缩包浏览模式下，"添加"按钮会变为向压缩包添加文件</li>
@@ -106,11 +106,11 @@ class HelpDialog(QDialog):
         file_types_text = QTextEdit()
         file_types_text.setReadOnly(True)
         file_types_text.setHtml("""
-        <div style="font-size: 13px;">
+        <div style="font-size: 14px;">
         <h3 style="font-size: 16px;">支持的文件类型（共24种格式）</h3>
         
-        <h4 style="font-size: 14px;">📦 完全支持（读取、创建、解压）</h4>
-        <table border="1" style="border-collapse: collapse; width: 100%; font-size: 13px;">
+        <h4 style="font-size: 16px;">📦 完全支持（读取、创建、解压）</h4>
+        <table border="1" style="border-collapse: collapse; width: 100%; font-size: 14px;">
             <tr style="background-color: #f0f0f0;">
                 <th style="padding: 6px;">格式</th>
                 <th style="padding: 6px;">扩展名</th>
@@ -128,8 +128,8 @@ class HelpDialog(QDialog):
             </tr>
         </table>
         
-        <h4 style="font-size: 14px;">📂 部分支持（仅读取和解压）</h4>
-        <table border="1" style="border-collapse: collapse; width: 100%; font-size: 13px;">
+        <h4 style="font-size: 16px;">📂 部分支持（仅读取和解压）</h4>
+        <table border="1" style="border-collapse: collapse; width: 100%; font-size: 14px;">
             <tr style="background-color: #f0f0f0;">
                 <th style="padding: 6px;">格式类型</th>
                 <th style="padding: 6px;">扩展名</th>
@@ -167,7 +167,7 @@ class HelpDialog(QDialog):
             </tr>
         </table>
         
-        <h4 style="font-size: 14px;">📝 注意事项</h4>
+        <h4 style="font-size: 16px;">📝 注意事项</h4>
         <ul>
             <li>创建压缩包时，推荐使用ZIP或7Z格式</li>
             <li>RAR格式需要安装WinRAR或7-Zip才能正常解压</li>
