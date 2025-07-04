@@ -196,10 +196,16 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
-        # 说明文字
+        # 说明文字和状态显示
         info_label = QLabel("选择要关联到 GudaZip 的文件类型：")
         info_label.setFont(QFont("微软雅黑", 9, QFont.Bold))
         layout.addWidget(info_label)
+        
+        # 文件关联状态显示
+        self.association_status_label = QLabel()
+        self.association_status_label.setStyleSheet("color: #666; font-size: 9pt; margin: 5px 0px;")
+        self.association_status_label.setWordWrap(True)
+        layout.addWidget(self.association_status_label)
         
         # 创建滚动区域包含文件类型选择
         scroll_area = QScrollArea()
@@ -338,6 +344,7 @@ class SettingsDialog(QDialog):
         # 连接复选框状态变化信号
         for checkbox in self.file_type_checkboxes.values():
             checkbox.stateChanged.connect(self.update_file_count_label)
+            checkbox.stateChanged.connect(self.update_association_status_display)
         
     def create_context_menu_tab(self):
         """创建右键菜单设置页"""
@@ -347,6 +354,12 @@ class SettingsDialog(QDialog):
         # 右键菜单设置
         context_menu_group = QGroupBox("右键菜单设置")
         context_menu_layout = QVBoxLayout(context_menu_group)
+        
+        # 右键菜单状态显示
+        self.context_menu_status_label = QLabel()
+        self.context_menu_status_label.setStyleSheet("color: #666; font-size: 9pt; margin: 5px 0px;")
+        self.context_menu_status_label.setWordWrap(True)
+        context_menu_layout.addWidget(self.context_menu_status_label)
         
         self.enable_context_menu_cb = QCheckBox("启用文件右键菜单")
         context_menu_layout.addWidget(self.enable_context_menu_cb)
@@ -420,6 +433,78 @@ class SettingsDialog(QDialog):
         checked_count = sum(1 for cb in self.file_type_checkboxes.values() if cb.isChecked())
         total_count = len(self.file_type_checkboxes)
         self.file_count_label.setText(f"已选择 {checked_count} 个文件类型，共 {total_count} 个支持格式。")
+        
+    def update_association_status_display(self):
+        """更新文件关联状态显示"""
+        try:
+            # 检查当前系统中的文件关联状态
+            all_extensions = [ext for ext, _ in self.supported_types]
+            current_associations = self.file_association_manager.check_association_status(all_extensions)
+            
+            # 统计已关联的文件类型
+            associated_count = sum(1 for status in current_associations.values() if status)
+            total_count = len(all_extensions)
+            
+            if associated_count > 0:
+                associated_types = [ext for ext, status in current_associations.items() if status]
+                status_text = f"📋 当前已关联 {associated_count}/{total_count} 个文件类型\n"
+                status_text += f"已关联: {', '.join(associated_types[:8])}"
+                if len(associated_types) > 8:
+                    status_text += f" 等 {len(associated_types)} 个格式"
+                self.association_status_label.setStyleSheet("color: #0066cc; font-size: 9pt; margin: 5px 0px;")
+            else:
+                status_text = "📋 当前没有文件类型关联到 GudaZip"
+                self.association_status_label.setStyleSheet("color: #666; font-size: 9pt; margin: 5px 0px;")
+                
+            self.association_status_label.setText(status_text)
+            
+        except Exception as e:
+            self.association_status_label.setText(f"⚠️ 无法检查文件关联状态: {str(e)}")
+            self.association_status_label.setStyleSheet("color: #cc6600; font-size: 9pt; margin: 5px 0px;")
+    
+    def update_context_menu_status_display(self):
+        """更新右键菜单状态显示"""
+        try:
+            # 检查右键菜单状态
+            context_menu_status = self.file_association_manager.check_context_menu_status()
+            
+            # 检查是否有任何菜单项已安装
+            has_compression_menu = False
+            has_extraction_menu = False
+            
+            # 检查普通文件和文件夹的压缩菜单
+            files_folders_status = context_menu_status.get("files_and_folders", {})
+            for target_status in files_folders_status.values():
+                if any(target_status.values()):
+                    has_compression_menu = True
+                    break
+            
+            # 检查压缩文件的解压菜单
+            archives_status = context_menu_status.get("archives", {})
+            for ext_status in archives_status.values():
+                if any(ext_status.values()):
+                    has_extraction_menu = True
+                    break
+            
+            # 生成状态文本
+            status_parts = []
+            if has_compression_menu:
+                status_parts.append("✅ 文件/文件夹压缩菜单")
+            if has_extraction_menu:
+                status_parts.append("✅ 压缩文件解压菜单")
+            
+            if status_parts:
+                status_text = f"🖱️ 右键菜单状态: {', '.join(status_parts)}"
+                self.context_menu_status_label.setStyleSheet("color: #0066cc; font-size: 9pt; margin: 5px 0px;")
+            else:
+                status_text = "🖱️ 右键菜单未安装"
+                self.context_menu_status_label.setStyleSheet("color: #666; font-size: 9pt; margin: 5px 0px;")
+                
+            self.context_menu_status_label.setText(status_text)
+            
+        except Exception as e:
+            self.context_menu_status_label.setText(f"⚠️ 无法检查右键菜单状态: {str(e)}")
+            self.context_menu_status_label.setStyleSheet("color: #cc6600; font-size: 9pt; margin: 5px 0px;")
         
     def create_dialog_buttons(self, layout):
         """创建对话框按钮"""
@@ -573,6 +658,10 @@ class SettingsDialog(QDialog):
             self.on_context_menu_enabled_changed(
                 2 if self.enable_context_menu_cb.isChecked() else 0
             )
+            
+            # 更新状态显示
+            self.update_association_status_display()
+            self.update_context_menu_status_display()
             
         except Exception as e:
             QMessageBox.warning(self, "警告", f"加载设置时出错：{e}")
@@ -732,6 +821,8 @@ class SettingsDialog(QDialog):
                     "注意：新的安全右键菜单只针对压缩文件格式，"
                     "不会影响系统对象如'我的电脑'、'网络'等。")
                 self.enable_context_menu_cb.setChecked(True)
+                # 更新状态显示
+                self.update_context_menu_status_display()
             else:
                 message = result.get('message', '右键菜单安装失败')
                 error_code = result.get('error', '')
@@ -789,6 +880,8 @@ class SettingsDialog(QDialog):
                     self.context_menu_add_cb.setChecked(False)
                     self.context_menu_extract_cb.setChecked(False)
                     self.context_menu_open_cb.setChecked(False)
+                    # 更新状态显示
+                    self.update_context_menu_status_display()
                 else:
                     message = result.get('message', '右键菜单卸载失败')
                     QMessageBox.warning(self, "失败", f"{message}")
