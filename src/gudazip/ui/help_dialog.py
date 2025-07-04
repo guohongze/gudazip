@@ -231,7 +231,7 @@ class HelpDialog(QDialog):
         license_text.setHtml("""
          <div style="font-family: '微软雅黑', sans-serif; font-size: 12px; line-height: 1.6;">
          <h3 style="color: black; font-size: 16px; margin: 15px 0 10px 0;">软件许可协议</h3>
-         <p style="margin: 8px 0; font-size: 14px;">GudaZip是一款免费的压缩文件管理工具，用户可以自由使用、复制和分发。</p>
+         <p style="margin: 8px 0; font-size: 14px;">GudaZip是一款免费的压缩文件管理工具。</p>
          
          <h4 style="color: black; font-size: 16px; margin: 12px 0 8px 0;">使用条款：</h4>
          <ul style="margin: 8px 0; padding-left: 20px;">
