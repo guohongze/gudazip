@@ -212,7 +212,11 @@ class BackgroundTaskManager(QObject):
             task_info = list(self.active_tasks.values())[0]
             tooltip = f"GudaZip - {task_info.name} ({task_info.progress}%)"
         else:
-            tooltip = f"GudaZip - {len(self.active_tasks)} 个活动任务"
+            # 多个任务时，显示每个任务的名称和进度
+            task_lines = []
+            for task_info in self.active_tasks.values():
+                task_lines.append(f"{task_info.name}: {task_info.progress}%")
+            tooltip = f"GudaZip - {len(self.active_tasks)} 个活动任务\n" + "\n".join(task_lines)
             
         self.tray_icon.setToolTip(tooltip)
         

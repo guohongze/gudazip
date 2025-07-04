@@ -209,6 +209,8 @@ class CreateArchiveDialog(QDialog):
         
         self.init_ui()
         self.load_compression_settings()
+        # 初始化时更新自定义压缩比率的可用性
+        self.update_custom_compression_availability()
         
 
         
@@ -268,13 +270,13 @@ class CreateArchiveDialog(QDialog):
         
         self.compression_group = QButtonGroup()
         
-        # 快速压缩（默认选择）
+        # 快速压缩（默认选择）- ZIP格式，压缩比3
         self.fast_compression_radio = QRadioButton("快速压缩")
         self.fast_compression_radio.setChecked(True)
         self.compression_group.addButton(self.fast_compression_radio, 3)
         compression_layout.addWidget(self.fast_compression_radio)
         
-        # 较小体积（原极致压缩）
+        # 较小体积（原极致压缩）- 7Z格式
         self.small_compression_radio = QRadioButton("较小体积")
         self.compression_group.addButton(self.small_compression_radio, 6)
         compression_layout.addWidget(self.small_compression_radio)
@@ -293,6 +295,10 @@ class CreateArchiveDialog(QDialog):
         self.format_combo.addItems(["zip", "7z"])
         self.format_combo.currentTextChanged.connect(self.on_format_changed)
         compression_layout.addWidget(self.format_combo)
+        
+        # 连接压缩模式变化信号
+        self.fast_compression_radio.toggled.connect(self.on_compression_mode_changed)
+        self.small_compression_radio.toggled.connect(self.on_compression_mode_changed)
         
         layout.addLayout(compression_layout)
         
@@ -493,6 +499,22 @@ class CreateArchiveDialog(QDialog):
         if file_path:
             self.path_edit.setText(file_path)
             
+    def on_compression_mode_changed(self, checked):
+        """压缩模式改变事件"""
+        if not checked:
+            return
+            
+        # 根据压缩模式自动选择格式
+        if self.fast_compression_radio.isChecked():
+            # 快速压缩 -> ZIP格式
+            self.format_combo.setCurrentText("zip")
+        elif self.small_compression_radio.isChecked():
+            # 较小体积 -> 7Z格式
+            self.format_combo.setCurrentText("7z")
+            
+        # 更新自定义压缩比率的可用性
+        self.update_custom_compression_availability()
+    
     def on_format_changed(self, format_text):
         """格式改变事件"""
         # 根据格式更新文件扩展名
@@ -503,6 +525,9 @@ class CreateArchiveDialog(QDialog):
                 self.path_edit.setText(base_path + ".zip")
             elif "7z" in format_text.lower():
                 self.path_edit.setText(base_path + ".7z")
+                
+        # 更新自定义压缩比率的可用性
+        self.update_custom_compression_availability()
                 
     def on_password_button_toggled(self, checked):
         """密码保护按钮切换"""
@@ -533,6 +558,21 @@ class CreateArchiveDialog(QDialog):
         """后台压缩选项切换"""
         self.is_background_mode = checked
         
+    def update_custom_compression_availability(self):
+        """更新自定义压缩比率的可用性"""
+        current_format = self.format_combo.currentText().lower()
+        
+        # 检查7z格式是否支持自定义压缩比率
+        # 根据7z处理器的实现，7z格式支持压缩级别设置
+        if current_format == "7z":
+            # 7z格式支持自定义压缩比率
+            self.custom_compression_radio.setEnabled(True)
+            self.custom_compression_radio.setToolTip("")
+        else:
+            # zip格式支持自定义压缩比率
+            self.custom_compression_radio.setEnabled(True)
+            self.custom_compression_radio.setToolTip("")
+    
     def on_custom_compression_toggled(self, checked):
         """自定义压缩选项切换"""
         if checked:
@@ -550,8 +590,20 @@ class CreateArchiveDialog(QDialog):
     def get_compression_level(self):
         """获取当前选择的压缩级别"""
         checked_id = self.compression_group.checkedId()
+        current_format = self.format_combo.currentText().lower()
+        
         if checked_id == -1:  # 自定义比率
             return self.compression_slider.value()
+        elif checked_id == 3:  # 快速压缩
+            # 快速压缩固定使用压缩级别3
+            return 3
+        elif checked_id == 6:  # 较小体积
+            if current_format == "7z":
+                # 7z格式使用较高的压缩级别
+                return 9
+            else:
+                # zip格式使用中等压缩级别
+                return 6
         else:
             return checked_id
     
@@ -720,8 +772,21 @@ class CreateArchiveDialog(QDialog):
             QMessageBox.warning(self, "警告", "请指定压缩包保存路径")
             return
             
+        # 根据压缩模式确保正确的格式和扩展名
+        compression_mode = self.get_compression_mode()
+        if compression_mode == "fast":
+            # 快速压缩强制使用zip格式
+            self.format_combo.setCurrentText("zip")
+            selected_format = "zip"
+        elif compression_mode == "small":
+            # 较小体积强制使用7z格式
+            self.format_combo.setCurrentText("7z")
+            selected_format = "7z"
+        else:
+            # 自定义模式使用用户选择的格式
+            selected_format = self.format_combo.currentText().lower()
+            
         # 确保文件扩展名正确
-        selected_format = self.format_combo.currentText().lower()
         if selected_format == "zip" and not archive_path.lower().endswith('.zip'):
             archive_path += '.zip'
             self.path_edit.setText(archive_path)

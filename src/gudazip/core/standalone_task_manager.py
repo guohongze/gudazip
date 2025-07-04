@@ -243,9 +243,18 @@ class StandaloneTaskManager(QObject):
         if not self.tray_icon:
             return
             
-        running_count = len([t for t in self.tasks.values() if t.status == 'running'])
-        if running_count > 0:
-            self.tray_icon.setToolTip(f"GudaZip 后台任务管理器 - {running_count} 个任务正在运行")
+        running_tasks = [t for t in self.tasks.values() if t.status == 'running']
+        if running_tasks:
+            if len(running_tasks) == 1:
+                task = running_tasks[0]
+                self.tray_icon.setToolTip(f"GudaZip - {task.task_name} ({task.progress}%)")
+            else:
+                # 多个任务时，显示每个任务的名称和进度
+                task_lines = []
+                for task in running_tasks:
+                    task_lines.append(f"{task.task_name}: {task.progress}%")
+                tooltip = f"GudaZip - {len(running_tasks)} 个任务正在运行\n" + "\n".join(task_lines)
+                self.tray_icon.setToolTip(tooltip)
         else:
             self.tray_icon.setToolTip("GudaZip 后台任务管理器 - 无活动任务")
             
@@ -293,6 +302,8 @@ class StandaloneTaskManager(QObject):
         if task_id in self.tasks:
             self.tasks[task_id].progress = progress
             self._save_task_info(self.tasks[task_id])
+            # 更新托盘提示以显示最新进度
+            self.update_tray_tooltip()
             
     def _on_task_status(self, task_id: str, status: str):
         """任务状态更新"""

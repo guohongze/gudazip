@@ -214,13 +214,27 @@ class ZipHandler:
                 
             # 设置压缩级别
             compression = zipfile.ZIP_DEFLATED
+            compresslevel = None
             if compression_level == 0:
                 compression = zipfile.ZIP_STORED
+            else:
+                # ZIP压缩级别：1-9，其中1最快，9最小
+                compresslevel = max(1, min(9, compression_level))
             
             processed_size = 0
             processed_files = 0
                 
-            with zipfile.ZipFile(file_path, 'w', compression) as zf:
+            # 创建ZIP文件，支持压缩级别
+            zip_kwargs = {'mode': 'w', 'compression': compression}
+            if compresslevel is not None:
+                try:
+                    # Python 3.7+支持compresslevel参数
+                    zip_kwargs['compresslevel'] = compresslevel
+                except TypeError:
+                    # 旧版本Python不支持compresslevel参数
+                    pass
+                    
+            with zipfile.ZipFile(file_path, **zip_kwargs) as zf:
                 for file_or_dir in files:
                     if os.path.isfile(file_or_dir):
                         # 添加文件
@@ -542,4 +556,4 @@ class ZipHandler:
         except PermissionError as e:
             raise PermissionError(f"权限不足: {e}")
         except Exception as e:
-            raise Exception(f"添加文件失败: {e}") 
+            raise Exception(f"添加文件失败: {e}")
