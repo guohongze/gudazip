@@ -26,8 +26,16 @@ class FileAssociationManager:
         
         # 支持的压缩文件扩展名
         self.supported_extensions = [
-            '.zip', '.rar', '.7z', '.tar', '.gz', 
-            '.bz2', '.xz', '.lzma', '.z', '.tgz'
+            # 基础格式
+            '.zip', '.rar', '.7z', 
+            # tar系列
+            '.tar', '.tgz', '.tar.gz', '.tbz', '.tbz2', '.tar.bz2', '.txz', '.tar.xz', '.taz',
+            # 压缩格式
+            '.gz', '.gzip', '.bz2', '.bzip2', '.xz', '.lzma', '.z',
+            # 其他常见格式
+            '.cab', '.arj', '.lzh', '.cpio',
+            # ISO镜像（如果需要）
+            '.iso'
         ]
     
     @staticmethod

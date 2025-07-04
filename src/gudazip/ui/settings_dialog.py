@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, 
     QLabel, QPushButton, QLineEdit, QComboBox, QSpinBox, 
     QCheckBox, QSlider, QGroupBox, QFormLayout, QMessageBox,
-    QFileDialog, QDialogButtonBox, QListWidget, QListWidgetItem
+    QFileDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
+    QScrollArea, QGridLayout
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -200,30 +201,97 @@ class SettingsDialog(QDialog):
         info_label.setFont(QFont("微软雅黑", 9, QFont.Bold))
         layout.addWidget(info_label)
         
-        # 文件类型列表
-        self.file_types_list = QListWidget()
-        self.file_types_list.setMaximumHeight(200)
+        # 创建滚动区域包含文件类型选择
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMaximumHeight(240)  # 减小高度，因为使用了更多列
+        scroll_area.setMinimumHeight(180)  # 设置最小高度确保内容可见
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         
-        # 支持的文件类型
+        # 文件类型容器
+        file_types_widget = QWidget()
+        file_types_layout = QGridLayout(file_types_widget)
+        file_types_layout.setSpacing(5)  # 减小间距以适应更多列
+        file_types_layout.setContentsMargins(8, 8, 8, 8)  # 减小边距
+        file_types_layout.setHorizontalSpacing(6)  # 设置水平间距
+        file_types_layout.setVerticalSpacing(4)    # 设置垂直间距
+        
+        # 扩展的支持文件类型列表
         self.supported_types = [
+            # 基础格式
             ('.zip', 'ZIP 压缩文件'),
-            ('.7z', '7-Zip 压缩文件'),
             ('.rar', 'RAR 压缩文件'),
+            ('.7z', '7-Zip 压缩文件'),
+            
+            # tar系列
             ('.tar', 'TAR 归档文件'),
-            ('.gz', 'GZIP 压缩文件'),
-            ('.bz2', 'BZIP2 压缩文件'),
+            ('.tgz', 'TAR.GZ 压缩文件'),
             ('.tar.gz', 'TAR.GZ 压缩文件'),
-            ('.tar.bz2', 'TAR.BZ2 压缩文件')
+            ('.tbz', 'TAR.BZ2 压缩文件'),
+            ('.tbz2', 'TAR.BZ2 压缩文件'),
+            ('.tar.bz2', 'TAR.BZ2 压缩文件'),
+            ('.txz', 'TAR.XZ 压缩文件'),
+            ('.tar.xz', 'TAR.XZ 压缩文件'),
+            ('.taz', 'TAR.Z 压缩文件'),
+            
+            # 单一压缩格式
+            ('.gz', 'GZIP 压缩文件'),
+            ('.gzip', 'GZIP 压缩文件'),
+            ('.bz2', 'BZIP2 压缩文件'),
+            ('.bzip2', 'BZIP2 压缩文件'),
+            ('.xz', 'XZ 压缩文件'),
+            ('.lzma', 'LZMA 压缩文件'),
+            ('.z', 'COMPRESS 压缩文件'),
+            
+            # 其他格式
+            ('.cab', 'CAB 压缩文件'),
+            ('.arj', 'ARJ 压缩文件'),
+            ('.lzh', 'LZH 压缩文件'),
+            ('.cpio', 'CPIO 归档文件'),
+            ('.iso', 'ISO 镜像文件')
         ]
         
-        # 添加文件类型到列表
-        for ext, desc in self.supported_types:
-            item = QListWidgetItem(ext)  # 只显示扩展名
-            item.setCheckState(Qt.Unchecked)
-            item.setData(Qt.UserRole, ext)  # 存储扩展名
-            self.file_types_list.addItem(item)
+        # 创建复选框字典用于后续访问
+        self.file_type_checkboxes = {}
         
-        layout.addWidget(self.file_types_list)
+        # 按6列排列文件类型复选框，更好地利用空间
+        columns = 6
+        for index, (ext, desc) in enumerate(self.supported_types):
+            row = index // columns
+            col = index % columns
+            
+            checkbox = QCheckBox(f"{ext}")
+            checkbox.setToolTip(desc)  # 使用工具提示显示完整描述
+            checkbox.setMinimumWidth(85)  # 减小最小宽度以适应更多列
+            checkbox.setMaximumWidth(120)  # 设置最大宽度保持整齐
+            
+            # 设置样式让复选框更美观和紧凑
+            checkbox.setStyleSheet("""
+                QCheckBox {
+                    font-size: 9pt;
+                    padding: 1px 3px;
+                    margin: 1px;
+                }
+                QCheckBox::indicator {
+                    width: 13px;
+                    height: 13px;
+                }
+            """)
+            
+            # 存储复选框引用
+            self.file_type_checkboxes[ext] = checkbox
+            
+            file_types_layout.addWidget(checkbox, row, col)
+        
+        scroll_area.setWidget(file_types_widget)
+        layout.addWidget(scroll_area)
+        
+        # 统计信息标签
+        self.file_count_label = QLabel()
+        self.file_count_label.setStyleSheet("color: #666; font-size: 8pt;")
+        self.update_file_count_label()
+        layout.addWidget(self.file_count_label)
         
         # 操作按钮
         button_layout = QHBoxLayout()
@@ -239,6 +307,12 @@ class SettingsDialog(QDialog):
         self.clear_all_btn = QPushButton("清除")
         self.clear_all_btn.clicked.connect(self.clear_all_file_types)
         button_layout.addWidget(self.clear_all_btn)
+        
+        # 添加常用格式快速选择
+        common_btn = QPushButton("常用格式")
+        common_btn.setToolTip("选择最常用的压缩格式: ZIP, RAR, 7Z, TAR.GZ")
+        common_btn.clicked.connect(self.select_common_formats)
+        button_layout.addWidget(common_btn)
         
         button_layout.addStretch()
         layout.addLayout(button_layout)
@@ -260,6 +334,10 @@ class SettingsDialog(QDialog):
         
         layout.addStretch()
         self.tab_widget.addTab(tab, "文件关联")
+        
+        # 连接复选框状态变化信号
+        for checkbox in self.file_type_checkboxes.values():
+            checkbox.stateChanged.connect(self.update_file_count_label)
         
     def create_context_menu_tab(self):
         """创建右键菜单设置页"""
@@ -314,23 +392,34 @@ class SettingsDialog(QDialog):
         
     def select_all_file_types(self):
         """全选文件类型"""
-        for i in range(self.file_types_list.count()):
-            item = self.file_types_list.item(i)
-            item.setCheckState(Qt.Checked)
+        for checkbox in self.file_type_checkboxes.values():
+            checkbox.setChecked(True)
             
     def deselect_all_file_types(self):
         """反选文件类型"""
-        for i in range(self.file_types_list.count()):
-            item = self.file_types_list.item(i)
-            current_state = item.checkState()
+        for checkbox in self.file_type_checkboxes.values():
+            current_state = checkbox.checkState()
             new_state = Qt.Unchecked if current_state == Qt.Checked else Qt.Checked
-            item.setCheckState(new_state)
+            checkbox.setCheckState(new_state)
             
     def clear_all_file_types(self):
         """清除所有选择"""
-        for i in range(self.file_types_list.count()):
-            item = self.file_types_list.item(i)
-            item.setCheckState(Qt.Unchecked)
+        for checkbox in self.file_type_checkboxes.values():
+            checkbox.setChecked(False)
+            
+    def select_common_formats(self):
+        """快速选择常用压缩格式"""
+        common_formats = ['.zip', '.rar', '.7z', '.tar.gz']
+        for ext in common_formats:
+            if ext in self.file_type_checkboxes:
+                self.file_type_checkboxes[ext].setChecked(True)
+        self.update_file_count_label()
+        
+    def update_file_count_label(self):
+        """更新文件类型统计标签"""
+        checked_count = sum(1 for cb in self.file_type_checkboxes.values() if cb.isChecked())
+        total_count = len(self.file_type_checkboxes)
+        self.file_count_label.setText(f"已选择 {checked_count} 个文件类型，共 {total_count} 个支持格式。")
         
     def create_dialog_buttons(self, layout):
         """创建对话框按钮"""
@@ -451,17 +540,14 @@ class SettingsDialog(QDialog):
             all_extensions = [ext for ext, _ in self.supported_types]
             current_associations = self.file_association_manager.check_association_status(all_extensions)
             
-            for i in range(self.file_types_list.count()):
-                item = self.file_types_list.item(i)
-                ext = item.data(Qt.UserRole)
-                
+            for ext, checkbox in self.file_type_checkboxes.items():
                 # 优先显示系统实际关联状态，其次是配置文件中的状态
                 if current_associations.get(ext, False):
-                    item.setCheckState(Qt.Checked)
+                    checkbox.setCheckState(Qt.Checked)
                 elif ext in associated_types:
-                    item.setCheckState(Qt.Checked)
+                    checkbox.setCheckState(Qt.Checked)
                 else:
-                    item.setCheckState(Qt.Unchecked)
+                    checkbox.setCheckState(Qt.Unchecked)
             
             self.set_as_default_cb.setChecked(
                 self.config_manager.get_config('file_association.set_as_default', False)
@@ -524,10 +610,8 @@ class SettingsDialog(QDialog):
             
             # 文件关联设置
             associated_types = []
-            for i in range(self.file_types_list.count()):
-                item = self.file_types_list.item(i)
-                if item.checkState() == Qt.Checked:
-                    ext = item.data(Qt.UserRole)
+            for ext, checkbox in self.file_type_checkboxes.items():
+                if checkbox.isChecked():
                     associated_types.append(ext)
             
             self.config_manager.set_config('file_association.associated_types', associated_types)
@@ -588,10 +672,8 @@ class SettingsDialog(QDialog):
             
             # 文件关联设置
             associated_types = []
-            for i in range(self.file_types_list.count()):
-                item = self.file_types_list.item(i)
-                if item.checkState() == Qt.Checked:
-                    ext = item.data(Qt.UserRole)
+            for ext, checkbox in self.file_type_checkboxes.items():
+                if checkbox.isChecked():
                     associated_types.append(ext)
             
             self.config_manager.set_config('file_association.associated_types', associated_types)
@@ -712,4 +794,4 @@ class SettingsDialog(QDialog):
                     QMessageBox.warning(self, "失败", f"{message}")
                     
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"卸载右键菜单时发生错误：{str(e)}") 
+            QMessageBox.critical(self, "错误", f"卸载右键菜单时发生错误：{str(e)}")
