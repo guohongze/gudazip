@@ -206,6 +206,22 @@ class FileAssociationManager:
         
         return status
     
+    def get_associated_extensions(self) -> List[str]:
+        """获取当前已关联的扩展名列表"""
+        associated = []
+        
+        if not self.registry.is_available():
+            return associated
+        
+        for ext in self.supported_extensions:
+            try:
+                if self.registry.check_file_association(ext, self.prog_id):
+                    associated.append(ext)
+            except Exception:
+                continue
+        
+        return associated
+    
     def install_context_menu(self, menu_options: Dict[str, bool]) -> Dict[str, any]:
         """
         安全地安装右键菜单

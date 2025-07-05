@@ -221,6 +221,12 @@ def main():
         # 显示主窗口（只在非右键菜单模式下）
         window.show()
         
+        # 检查是否需要提示设置为默认压缩软件
+        try:
+            check_default_app_setting(window)
+        except Exception as e:
+            print(f"检查默认压缩软件设置时出错: {e}")
+        
         # 如果有压缩文件参数，在窗口显示后打开它
         if archive_file:
             try:
@@ -238,6 +244,43 @@ def main():
             # 如果连消息框都无法显示，则使用print
             print(f"严重错误：{str(e)}")
         return 1
+
+
+def check_default_app_setting(window):
+    """检查是否需要提示设置为默认压缩软件"""
+    try:
+        from gudazip.ui.default_app_dialog import DefaultAppDialog
+        
+        # 获取配置管理器和文件关联管理器
+        config_manager = window.config_manager
+        file_association_manager = window.file_association_manager
+        
+        # 检查是否设置了不再提示
+        never_ask = config_manager.get_config('startup.never_ask_default_app', False)
+        if never_ask:
+            return
+        
+        # 检查当前是否已经是默认压缩软件
+        associated_extensions = file_association_manager.get_associated_extensions()
+        all_extensions = file_association_manager.supported_extensions
+        
+        # 如果已经关联了大部分文件类型，认为已经是默认压缩软件
+        if len(associated_extensions) >= len(all_extensions) * 0.8:  # 80%以上
+            return
+        
+        # 显示默认压缩软件设置对话框
+        dialog = DefaultAppDialog(
+            parent=window,
+            file_association_manager=file_association_manager,
+            config_manager=config_manager
+        )
+        
+        dialog.exec()
+        
+    except ImportError as e:
+        print(f"无法导入默认应用设置对话框: {e}")
+    except Exception as e:
+        print(f"检查默认压缩软件设置时出错: {e}")
 
 
 def handle_context_menu_action(window, action, target_file):

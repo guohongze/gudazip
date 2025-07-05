@@ -203,7 +203,15 @@ class SettingsDialog(QDialog):
         
         # 文件关联状态显示
         self.association_status_label = QLabel()
-        self.association_status_label.setStyleSheet("color: #666; font-size: 9pt; margin: 5px 0px;")
+        self.association_status_label.setStyleSheet(
+            "QLabel { "
+            "    color: #666; "
+            "    padding: 8px; "
+            "    background-color: #f8f9fa; "
+            "    border: 1px solid #e9ecef; "
+            "    border-radius: 4px; "
+            "}"
+        )
         self.association_status_label.setWordWrap(True)
         layout.addWidget(self.association_status_label)
         
@@ -323,20 +331,11 @@ class SettingsDialog(QDialog):
         button_layout.addStretch()
         layout.addLayout(button_layout)
         
-        # 默认程序设置
-        default_group = QGroupBox("默认程序设置")
-        default_layout = QVBoxLayout(default_group)
-        
-        self.set_as_default_cb = QCheckBox("将 GudaZip 设置为默认压缩程序")
-        default_layout.addWidget(self.set_as_default_cb)
-        
         # 警告提示
         warning_label = QLabel("⚠️ 修改文件关联需要管理员权限，某些操作可能需要重启资源管理器。")
-        warning_label.setStyleSheet("color: #ff6600; font-size: 9pt;")
+        warning_label.setStyleSheet("color: #ff6600; font-size: 9pt; padding: 8px; background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px;")
         warning_label.setWordWrap(True)
-        default_layout.addWidget(warning_label)
-        
-        layout.addWidget(default_group)
+        layout.addWidget(warning_label)
         
         layout.addStretch()
         self.tab_widget.addTab(tab, "文件关联")
@@ -357,7 +356,15 @@ class SettingsDialog(QDialog):
         
         # 右键菜单状态显示
         self.context_menu_status_label = QLabel()
-        self.context_menu_status_label.setStyleSheet("color: #666; font-size: 9pt; margin: 5px 0px;")
+        self.context_menu_status_label.setStyleSheet(
+            "QLabel { "
+            "    color: #666; "
+            "    padding: 8px; "
+            "    background-color: #f8f9fa; "
+            "    border: 1px solid #e9ecef; "
+            "    border-radius: 4px; "
+            "}"
+        )
         self.context_menu_status_label.setWordWrap(True)
         context_menu_layout.addWidget(self.context_menu_status_label)
         
@@ -634,9 +641,7 @@ class SettingsDialog(QDialog):
                 else:
                     checkbox.setCheckState(Qt.Unchecked)
             
-            self.set_as_default_cb.setChecked(
-                self.config_manager.get_config('file_association.set_as_default', False)
-            )
+            # 移除了set_as_default_cb的设置，因为已经删除了该控件
             
             # 右键菜单设置
             context_menu_installed = self.file_association_manager.check_context_menu_status_simple()
@@ -704,7 +709,7 @@ class SettingsDialog(QDialog):
                     associated_types.append(ext)
             
             self.config_manager.set_config('file_association.associated_types', associated_types)
-            self.config_manager.set_config('file_association.set_as_default', self.set_as_default_cb.isChecked())
+            # 移除了set_as_default的配置保存，因为已经删除了该控件
             
             # 右键菜单设置
             self.config_manager.set_config('context_menu.enabled', self.enable_context_menu_cb.isChecked())
@@ -716,10 +721,24 @@ class SettingsDialog(QDialog):
             self.config_manager.save_configs()
             
             # 处理文件关联（静默）
-            if associated_types:
+            current_associated = self.file_association_manager.get_associated_extensions()
+            
+            # 需要新增关联的文件类型
+            to_associate = [ext for ext in associated_types if ext not in current_associated]
+            # 需要取消关联的文件类型
+            to_unassociate = [ext for ext in current_associated if ext not in associated_types]
+            
+            # 注册新的文件关联
+            if to_associate:
                 self.file_association_manager.register_file_association(
-                    associated_types, 
-                    self.set_as_default_cb.isChecked()
+                    to_associate, 
+                    True  # 设置为默认程序
+                )
+            
+            # 取消不需要的文件关联
+            if to_unassociate:
+                self.file_association_manager.unregister_file_association(
+                    to_unassociate
                 )
             
             # 关闭对话框（不显示提示消息）
@@ -766,7 +785,6 @@ class SettingsDialog(QDialog):
                     associated_types.append(ext)
             
             self.config_manager.set_config('file_association.associated_types', associated_types)
-            self.config_manager.set_config('file_association.set_as_default', self.set_as_default_cb.isChecked())
             
             # 右键菜单设置
             self.config_manager.set_config('context_menu.enabled', self.enable_context_menu_cb.isChecked())
@@ -778,10 +796,24 @@ class SettingsDialog(QDialog):
             self.config_manager.save_configs()
             
             # 处理文件关联（静默）
-            if associated_types:
+            current_associated = self.file_association_manager.get_associated_extensions()
+            
+            # 需要新增关联的文件类型
+            to_associate = [ext for ext in associated_types if ext not in current_associated]
+            # 需要取消关联的文件类型
+            to_unassociate = [ext for ext in current_associated if ext not in associated_types]
+            
+            # 注册新的文件关联
+            if to_associate:
                 self.file_association_manager.register_file_association(
-                    associated_types, 
-                    self.set_as_default_cb.isChecked()
+                    to_associate, 
+                    True  # 设置为默认程序
+                )
+            
+            # 取消不需要的文件关联
+            if to_unassociate:
+                self.file_association_manager.unregister_file_association(
+                    to_unassociate
                 )
             
             # 关闭对话框（不显示提示消息）
