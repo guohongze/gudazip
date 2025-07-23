@@ -133,6 +133,8 @@ def get_build_exe_options(optimized=False):
 def get_bdist_msi_options(optimized=False):
     """获取MSI构建选项，支持优化模式"""
     suffix = "-Optimized" if optimized else ""
+    version_suffix = "v1.0" if APP_VERSION == "1.0.0" else f"v{APP_VERSION}"
+    
     return {
         "upgrade_code": "{12345678-1234-5678-9ABC-123456789012}",  # 固定的升级代码
         "add_to_path": False,
@@ -143,7 +145,7 @@ def get_bdist_msi_options(optimized=False):
             "comments": APP_DESCRIPTION,
             "keywords": "压缩;解压;归档;zip;rar;7z"
         },
-        "target_name": f"GudaZip-{APP_VERSION}{suffix}-Setup.msi"
+        "target_name": f"GudaZip-{version_suffix}{suffix}.msi"  # 修改文件名格式
     }
 
 # 可执行文件配置
