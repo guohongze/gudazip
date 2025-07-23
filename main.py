@@ -262,18 +262,26 @@ def check_default_app_setting(window):
             # 获取所有支持的扩展名
             all_extensions = file_association_manager.supported_extensions
             
-            # 自动关联所有支持的文件格式
-            success_count = 0
-            for ext in all_extensions:
-                try:
-                    result = file_association_manager.register_file_association(ext)
-                    if result.get('success', False):
-                        success_count += 1
-                        print(f"✅ 已关联 {ext} 格式")
-                    else:
-                        print(f"❌ 关联 {ext} 格式失败: {result.get('message', '未知错误')}")
-                except Exception as e:
-                    print(f"❌ 关联 {ext} 格式时出错: {e}")
+            # 自动关联所有支持的文件格式（一次性批量注册）
+            try:
+                result = file_association_manager.register_file_association(all_extensions)
+                success_count = result.get('success_count', 0)
+                
+                if result.get('success', False):
+                    print(f"✅ 文件关联批量设置成功，共关联 {success_count} 种格式")
+                    # 显示详细结果
+                    details = result.get('details', {})
+                    for ext, detail in details.items():
+                        if detail.get('success', False):
+                            print(f"  ✅ {ext} 格式关联成功")
+                        else:
+                            print(f"  ❌ {ext} 格式关联失败: {detail.get('error', '未知错误')}")
+                else:
+                    print(f"❌ 文件关联批量设置失败: {result.get('message', '未知错误')}")
+                    
+            except Exception as e:
+                print(f"❌ 文件关联设置时出错: {e}")
+                success_count = 0
             
             # 标记为非首次运行
             config_manager.set_config('startup.first_run', False)
