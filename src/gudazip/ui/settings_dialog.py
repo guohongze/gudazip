@@ -444,6 +444,22 @@ class SettingsDialog(QDialog):
     def update_association_status_display(self):
         """更新文件关联状态显示"""
         try:
+            # 检查PyWin32是否可用
+            from ..core.pywin32_registry import PyWin32Registry
+            pywin32_registry = PyWin32Registry()
+            
+            if not pywin32_registry.is_available():
+                # PyWin32不可用，显示警告状态
+                self.association_status_label.setText(
+                    "⚠️ PyWin32模块不可用，无法检查文件关联状态\n"
+                    "请安装PyWin32模块以使用文件关联功能"
+                )
+                self.association_status_label.setStyleSheet(
+                    "QLabel { color: #d32f2f; background-color: #ffebee; "
+                    "border: 1px solid #ffcdd2; border-radius: 4px; padding: 8px; }"
+                )
+                return
+            
             # 检查当前系统中的文件关联状态
             all_extensions = [ext for ext, _ in self.supported_types]
             current_associations = self.file_association_manager.check_association_status(all_extensions)
@@ -472,6 +488,20 @@ class SettingsDialog(QDialog):
     def update_context_menu_status_display(self):
         """更新右键菜单状态显示"""
         try:
+            # 检查PyWin32是否可用
+            from ..core.pywin32_registry import PyWin32Registry
+            pywin32_registry = PyWin32Registry()
+            
+            if not pywin32_registry.is_available():
+                # PyWin32不可用，显示警告状态
+                self.context_menu_status_label.setText(
+                    "⚠️ PyWin32模块不可用，无法检查右键菜单状态"
+                )
+                self.context_menu_status_label.setStyleSheet(
+                    "color: #d32f2f; font-size: 9pt; margin: 5px 0px;"
+                )
+                return
+            
             # 检查右键菜单状态
             context_menu_status = self.file_association_manager.check_context_menu_status()
             
@@ -629,8 +659,20 @@ class SettingsDialog(QDialog):
             associated_types = self.config_manager.get_config('file_association.associated_types', [])
             
             # 检查当前系统中的文件关联状态
-            all_extensions = [ext for ext, _ in self.supported_types]
-            current_associations = self.file_association_manager.check_association_status(all_extensions)
+            try:
+                # 检查PyWin32是否可用
+                from ..core.pywin32_registry import PyWin32Registry
+                pywin32_registry = PyWin32Registry()
+                
+                if pywin32_registry.is_available():
+                    all_extensions = [ext for ext, _ in self.supported_types]
+                    current_associations = self.file_association_manager.check_association_status(all_extensions)
+                else:
+                    # PyWin32不可用，使用配置文件中的状态
+                    current_associations = {}
+            except Exception as e:
+                print(f"检查文件关联状态失败：{e}")
+                current_associations = {}
             
             for ext, checkbox in self.file_type_checkboxes.items():
                 # 优先显示系统实际关联状态，其次是配置文件中的状态
@@ -644,7 +686,19 @@ class SettingsDialog(QDialog):
             # 移除了set_as_default_cb的设置，因为已经删除了该控件
             
             # 右键菜单设置
-            context_menu_installed = self.file_association_manager.check_context_menu_status_simple()
+            try:
+                # 检查PyWin32是否可用
+                from ..core.pywin32_registry import PyWin32Registry
+                pywin32_registry = PyWin32Registry()
+                
+                if pywin32_registry.is_available():
+                    context_menu_installed = self.file_association_manager.check_context_menu_status_simple()
+                else:
+                    # PyWin32不可用，使用配置文件中的状态
+                    context_menu_installed = self.config_manager.get_config('context_menu.enabled', False)
+            except Exception as e:
+                print(f"检查右键菜单状态失败：{e}")
+                context_menu_installed = self.config_manager.get_config('context_menu.enabled', False)
             
             self.enable_context_menu_cb.setChecked(
                 context_menu_installed or self.config_manager.get_config('context_menu.enabled', False)
@@ -721,25 +775,36 @@ class SettingsDialog(QDialog):
             self.config_manager.save_configs()
             
             # 处理文件关联（静默）
-            current_associated = self.file_association_manager.get_associated_extensions()
-            
-            # 需要新增关联的文件类型
-            to_associate = [ext for ext in associated_types if ext not in current_associated]
-            # 需要取消关联的文件类型
-            to_unassociate = [ext for ext in current_associated if ext not in associated_types]
-            
-            # 注册新的文件关联
-            if to_associate:
-                self.file_association_manager.register_file_association(
-                    to_associate, 
-                    True  # 设置为默认程序
-                )
-            
-            # 取消不需要的文件关联
-            if to_unassociate:
-                self.file_association_manager.unregister_file_association(
-                    to_unassociate
-                )
+            try:
+                # 检查PyWin32是否可用
+                from ..core.pywin32_registry import PyWin32Registry
+                pywin32_registry = PyWin32Registry()
+                
+                if not pywin32_registry.is_available():
+                    # PyWin32不可用，跳过文件关联处理
+                    print("警告：PyWin32模块不可用，跳过文件关联处理")
+                else:
+                    current_associated = self.file_association_manager.get_associated_extensions()
+                    
+                    # 需要新增关联的文件类型
+                    to_associate = [ext for ext in associated_types if ext not in current_associated]
+                    # 需要取消关联的文件类型
+                    to_unassociate = [ext for ext in current_associated if ext not in associated_types]
+                    
+                    # 注册新的文件关联
+                    if to_associate:
+                        self.file_association_manager.register_file_association(
+                            to_associate, 
+                            True  # 设置为默认程序
+                        )
+                    
+                    # 取消不需要的文件关联
+                    if to_unassociate:
+                        self.file_association_manager.unregister_file_association(
+                            to_unassociate
+                        )
+            except Exception as e:
+                print(f"文件关联处理失败：{e}")
             
             # 关闭对话框（不显示提示消息）
             self.accept()
@@ -796,25 +861,36 @@ class SettingsDialog(QDialog):
             self.config_manager.save_configs()
             
             # 处理文件关联（静默）
-            current_associated = self.file_association_manager.get_associated_extensions()
-            
-            # 需要新增关联的文件类型
-            to_associate = [ext for ext in associated_types if ext not in current_associated]
-            # 需要取消关联的文件类型
-            to_unassociate = [ext for ext in current_associated if ext not in associated_types]
-            
-            # 注册新的文件关联
-            if to_associate:
-                self.file_association_manager.register_file_association(
-                    to_associate, 
-                    True  # 设置为默认程序
-                )
-            
-            # 取消不需要的文件关联
-            if to_unassociate:
-                self.file_association_manager.unregister_file_association(
-                    to_unassociate
-                )
+            try:
+                # 检查PyWin32是否可用
+                from ..core.pywin32_registry import PyWin32Registry
+                pywin32_registry = PyWin32Registry()
+                
+                if not pywin32_registry.is_available():
+                    # PyWin32不可用，跳过文件关联处理
+                    print("警告：PyWin32模块不可用，跳过文件关联处理")
+                else:
+                    current_associated = self.file_association_manager.get_associated_extensions()
+                    
+                    # 需要新增关联的文件类型
+                    to_associate = [ext for ext in associated_types if ext not in current_associated]
+                    # 需要取消关联的文件类型
+                    to_unassociate = [ext for ext in current_associated if ext not in associated_types]
+                    
+                    # 注册新的文件关联
+                    if to_associate:
+                        self.file_association_manager.register_file_association(
+                            to_associate, 
+                            True  # 设置为默认程序
+                        )
+                    
+                    # 取消不需要的文件关联
+                    if to_unassociate:
+                        self.file_association_manager.unregister_file_association(
+                            to_unassociate
+                        )
+            except Exception as e:
+                print(f"文件关联处理失败：{e}")
             
             # 关闭对话框（不显示提示消息）
             self.accept()
@@ -839,6 +915,29 @@ class SettingsDialog(QDialog):
     def install_context_menu(self):
         """安装右键菜单"""
         try:
+            # 首先检查PyWin32是否可用
+            from ..core.pywin32_registry import PyWin32Registry
+            pywin32_registry = PyWin32Registry()
+            
+            if not pywin32_registry.is_available():
+                # PyWin32不可用，显示安装提示
+                module_status = pywin32_registry.get_module_status()
+                missing_modules = module_status.get('missing_modules', [])
+                
+                reply = QMessageBox.question(
+                    self, "PyWin32模块缺失",
+                    f"文件关联功能需要PyWin32模块支持，但检测到以下模块缺失：\n"
+                    f"{', '.join(missing_modules)}\n\n"
+                    "是否要自动安装PyWin32模块？\n"
+                    "点击'是'将运行自动安装脚本。",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                
+                if reply == QMessageBox.Yes:
+                    self.run_pywin32_installer()
+                return
+            
             # 获取选中的菜单选项 - 简化版本
             menu_options = {
                 'add': self.context_menu_add_cb.isChecked(),
@@ -890,6 +989,76 @@ class SettingsDialog(QDialog):
                 
         except Exception as e:
             QMessageBox.critical(self, "错误", f"安装右键菜单时发生错误：{str(e)}")
+    
+    def run_pywin32_installer(self):
+        """运行PyWin32安装脚本"""
+        try:
+            import subprocess
+            import sys
+            from pathlib import Path
+            
+            # 查找安装脚本
+            script_path = Path(__file__).parent.parent.parent.parent / "install_pywin32.py"
+            
+            if not script_path.exists():
+                QMessageBox.critical(
+                    self, "错误", 
+                    f"未找到PyWin32安装脚本：{script_path}\n\n"
+                    "请手动安装PyWin32模块：\n"
+                    "pip install pywin32>=306"
+                )
+                return
+            
+            # 显示进度对话框
+            progress_dialog = QMessageBox(self)
+            progress_dialog.setWindowTitle("安装PyWin32")
+            progress_dialog.setText("正在安装PyWin32模块，请稍候...")
+            progress_dialog.setStandardButtons(QMessageBox.NoButton)
+            progress_dialog.show()
+            
+            # 在后台运行安装脚本
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(script_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5分钟超时
+                )
+                
+                progress_dialog.close()
+                
+                if result.returncode == 0:
+                    QMessageBox.information(
+                        self, "安装成功",
+                        "PyWin32模块安装成功！\n\n"
+                        "请重启GudaZip以使用文件关联功能。\n\n"
+                        "安装详情：\n" + result.stdout[-500:]  # 显示最后500个字符
+                    )
+                else:
+                    QMessageBox.warning(
+                        self, "安装失败",
+                        f"PyWin32模块安装失败。\n\n"
+                        f"错误信息：\n{result.stderr}\n\n"
+                        "请尝试手动安装：\n"
+                        "pip install pywin32>=306"
+                    )
+                    
+            except subprocess.TimeoutExpired:
+                progress_dialog.close()
+                QMessageBox.warning(
+                    self, "安装超时",
+                    "PyWin32安装超时。\n\n"
+                    "请尝试手动安装：\n"
+                    "pip install pywin32>=306"
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self, "错误", 
+                f"运行PyWin32安装脚本时发生错误：{e}\n\n"
+                "请尝试手动安装：\n"
+                "pip install pywin32>=306"
+            )
     
     def uninstall_context_menu(self):
         """卸载右键菜单"""

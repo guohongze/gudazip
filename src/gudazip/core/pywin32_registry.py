@@ -29,15 +29,15 @@ except ImportError as e:
     import_errors.append(f"win32con: {e}")
 
 try:
-    import win32shell
-    from win32shell import SHChangeNotify
+    from win32com.shell import shell as win32shell
+    from win32com.shell.shell import SHChangeNotify
     PYWIN32_MODULES['win32shell'] = True
 except ImportError as e:
     PYWIN32_MODULES['win32shell'] = False
     import_errors.append(f"win32shell: {e}")
 
 try:
-    import win32shellcon
+    from win32com.shell import shellcon as win32shellcon
     PYWIN32_MODULES['win32shellcon'] = True
 except ImportError as e:
     PYWIN32_MODULES['win32shellcon'] = False
@@ -575,4 +575,4 @@ class PyWin32Registry:
                 return False
         except Exception as e:
             print(f"检查菜单状态失败 {target}\\{menu_id}: {e}")
-            return False 
+            return False

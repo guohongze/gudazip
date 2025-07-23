@@ -478,6 +478,10 @@ class FileAssociationManager:
     
     def check_context_menu_status_simple(self) -> bool:
         """简化的右键菜单状态检查接口（向后兼容）"""
+        # 检查PyWin32是否可用
+        if not self.registry.is_available():
+            return False
+            
         status = self.check_context_menu_status()
         # 如果任何文件类型有任何菜单项，就认为已安装
         for ext_status in status.values():

@@ -40,7 +40,14 @@ def get_build_exe_options(optimized=False):
                 "rarfile",
                 "py7zr",
                 # 图像处理
-                "PIL"
+                "PIL",
+                # PyWin32模块（文件关联功能必需）
+                "win32api",
+                "win32con",
+                "win32com",
+                "win32com.shell",
+                "pywintypes",
+                "pythoncom"
             ],
             # 排除不需要的模块和PySide6组件
             "excludes": [
@@ -127,9 +134,16 @@ def get_build_exe_options(optimized=False):
                 "rarfile",
                 "py7zr",
                 # 图像处理
-                "PIL"
-            ],
-            "excludes": ["tkinter", "unittest", "email", "xml"]
+                "PIL",
+                # PyWin32模块（文件关联功能必需）
+                "win32api",
+                "win32con",
+                "win32com",
+                "win32com.shell",
+                "pywintypes",
+                "pythoncom"
+             ],
+             "excludes": ["tkinter", "unittest", "email", "xml"]
         }
 
 def get_bdist_msi_options(optimized=False):
