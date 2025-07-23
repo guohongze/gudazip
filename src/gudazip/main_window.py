@@ -39,6 +39,10 @@ class MainWindow(QMainWindow):
         self.state_manager = get_state_manager(self)
         self.config_manager = get_config_manager(self)
         
+        # 初始化文件关联管理器
+        from .core.file_association_manager import FileAssociationManager
+        self.file_association_manager = FileAssociationManager()
+        
         # 初始化后台任务管理器
         from .ui.background_task_manager import get_background_task_manager
         self.background_task_manager = get_background_task_manager()

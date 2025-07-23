@@ -247,40 +247,81 @@ def main():
 
 
 def check_default_app_setting(window):
-    """检查是否需要提示设置为默认压缩软件"""
+    """检查并自动设置文件关联（首次运行时）"""
     try:
-        from gudazip.ui.default_app_dialog import DefaultAppDialog
-        
         # 获取配置管理器和文件关联管理器
         config_manager = window.config_manager
         file_association_manager = window.file_association_manager
         
-        # 检查是否设置了不再提示
-        never_ask = config_manager.get_config('startup.never_ask_default_app', False)
-        if never_ask:
-            return
+        # 检查是否是首次运行
+        first_run = config_manager.get_config('startup.first_run', True)
         
-        # 检查当前是否已经是默认压缩软件
-        associated_extensions = file_association_manager.get_associated_extensions()
-        all_extensions = file_association_manager.supported_extensions
+        if first_run:
+            print("检测到首次运行，正在自动设置文件关联...")
+            
+            # 获取所有支持的扩展名
+            all_extensions = file_association_manager.supported_extensions
+            
+            # 自动关联所有支持的文件格式
+            success_count = 0
+            for ext in all_extensions:
+                try:
+                    result = file_association_manager.register_file_association(ext)
+                    if result.get('success', False):
+                        success_count += 1
+                        print(f"✅ 已关联 {ext} 格式")
+                    else:
+                        print(f"❌ 关联 {ext} 格式失败: {result.get('message', '未知错误')}")
+                except Exception as e:
+                    print(f"❌ 关联 {ext} 格式时出错: {e}")
+            
+            # 标记为非首次运行
+            config_manager.set_config('startup.first_run', False)
+            config_manager.save_configs()
+            
+            print(f"文件关联设置完成：成功关联 {success_count}/{len(all_extensions)} 种格式")
+            
+            # 如果成功关联了大部分格式，显示成功提示
+            if success_count >= len(all_extensions) * 0.8:  # 80%以上
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    window,
+                    "文件关联设置完成",
+                    f"GudaZip 已成功关联 {success_count} 种压缩文件格式。\n\n"
+                    f"现在您可以双击压缩文件直接用 GudaZip 打开！"
+                )
+        else:
+            # 非首次运行，检查是否需要提示用户手动设置
+            associated_extensions = file_association_manager.get_associated_extensions()
+            all_extensions = file_association_manager.supported_extensions
+            
+            # 如果关联的格式很少，提示用户可以在设置中手动关联
+            if len(associated_extensions) < len(all_extensions) * 0.5:  # 少于50%
+                never_ask = config_manager.get_config('startup.never_ask_default_app', False)
+                if not never_ask:
+                    from PySide6.QtWidgets import QMessageBox, QCheckBox
+                    
+                    msg_box = QMessageBox(window)
+                    msg_box.setWindowTitle("文件关联提示")
+                    msg_box.setText(
+                        "检测到您的 GudaZip 尚未关联大部分压缩文件格式。\n\n"
+                        "您可以在 设置 → 文件关联 中手动设置文件关联。"
+                    )
+                    msg_box.setStandardButtons(QMessageBox.Ok)
+                    
+                    # 添加"不再提示"复选框
+                    checkbox = QCheckBox("不再提示")
+                    msg_box.setCheckBox(checkbox)
+                    
+                    msg_box.exec()
+                    
+                    # 如果用户勾选了"不再提示"，保存设置
+                    if checkbox.isChecked():
+                        config_manager.set_config('startup.never_ask_default_app', True)
+                        config_manager.save_configs()
         
-        # 如果已经关联了大部分文件类型，认为已经是默认压缩软件
-        if len(associated_extensions) >= len(all_extensions) * 0.8:  # 80%以上
-            return
-        
-        # 显示默认压缩软件设置对话框
-        dialog = DefaultAppDialog(
-            parent=window,
-            file_association_manager=file_association_manager,
-            config_manager=config_manager
-        )
-        
-        dialog.exec()
-        
-    except ImportError as e:
-        print(f"无法导入默认应用设置对话框: {e}")
     except Exception as e:
-        print(f"检查默认压缩软件设置时出错: {e}")
+        print(f"检查文件关联设置时出错: {e}")
 
 
 def handle_context_menu_action(window, action, target_file):

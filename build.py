@@ -26,7 +26,8 @@ def get_build_exe_options(optimized=False):
             "build_exe": "build/exe_optimized",
             "include_files": [
                 ("resources/", "resources/"),
-                ("src/gudazip/", "gudazip/")
+                ("src/gudazip/", "gudazip/"),
+                ("main.py", "main.py")  # 确保main.py被包含
             ],
             "packages": [
                 # 只包含必需的PySide6核心模块
@@ -114,7 +115,8 @@ def get_build_exe_options(optimized=False):
             "build_exe": "build/exe",
             "include_files": [
                 ("resources/", "resources/"),
-                ("src/gudazip/", "gudazip/")
+                ("src/gudazip/", "gudazip/"),
+                ("main.py", "main.py")  # 确保main.py被包含
             ],
             "packages": [
                 # GUI框架
@@ -132,7 +134,6 @@ def get_build_exe_options(optimized=False):
 
 def get_bdist_msi_options(optimized=False):
     """获取MSI构建选项，支持优化模式"""
-    suffix = "-Optimized" if optimized else ""
     version_suffix = "v1.0" if APP_VERSION == "1.0.0" else f"v{APP_VERSION}"
     
     return {
@@ -145,7 +146,7 @@ def get_bdist_msi_options(optimized=False):
             "comments": APP_DESCRIPTION,
             "keywords": "压缩;解压;归档;zip;rar;7z"
         },
-        "target_name": f"GudaZip-{version_suffix}{suffix}.msi"  # 修改文件名格式
+        "target_name": f"GudaZip-{version_suffix}.msi"  # 移除Optimized后缀
     }
 
 # 可执行文件配置
@@ -190,10 +191,8 @@ def create_custom_msi_script():
       <ComponentRef Id="UninstallComponent" />
     </Feature>
     
-    <!-- 文件关联功能（用户可选，默认启用） -->
-    <Feature Id="FileAssociationFeature" Title="文件关联" Description="将压缩文件格式关联到 GudaZip（推荐）" Level="1" Display="expand">
-      <Condition Level="1">SET_AS_DEFAULT="1"</Condition>
-      <Condition Level="0">SET_AS_DEFAULT&lt;&gt;"1"</Condition>
+    <!-- 文件关联功能（默认安装所有支持格式） -->
+    <Feature Id="FileAssociationFeature" Title="文件关联" Description="将所有支持的压缩文件格式关联到 GudaZip" Level="1">
       <ComponentRef Id="BasicFormats" />
       <ComponentRef Id="TarFormats" />
       <ComponentRef Id="CompressionFormats" />
@@ -364,33 +363,10 @@ def create_custom_msi_script():
     
     <!-- 安装UI -->
     <UI>
-      <UIRef Id="WixUI_FeatureTree" />
-      
-      <!-- 自定义文件关联选择对话框 -->
-      <Dialog Id="FileAssociationDlg" Width="370" Height="270" Title="文件关联设置">
-        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="选择要关联的文件类型" />
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="GudaZip 可以关联以下压缩文件格式，使其默认用 GudaZip 打开：" />
-        
-        <Control Id="SetAsDefaultCheck" Type="CheckBox" X="25" Y="50" Width="280" Height="17" Property="SET_AS_DEFAULT" CheckBoxValue="1" Text="设置 GudaZip 为默认压缩程序（推荐）" />
-        
-        <Control Id="SupportedFormatsText" Type="Text" X="25" Y="75" Width="280" Height="60" Transparent="yes" NoPrefix="yes" Text="支持的格式包括：&#xD;&#xA;• 基础格式：ZIP, RAR, 7Z&#xD;&#xA;• TAR系列：TAR, TGZ, TBZ, TXZ 等&#xD;&#xA;• 压缩格式：GZ, BZ2, XZ, LZMA 等&#xD;&#xA;• 其他格式：CAB, ARJ, LZH, CPIO, ISO" />
-        
-        <Control Id="WarningText" Type="Text" X="25" Y="145" Width="280" Height="30" Transparent="yes" NoPrefix="yes" Text="注意：如果取消勾选，您仍可以在安装后通过程序设置手动关联文件类型。" />
-        
-        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="上一步" />
-        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="下一步" />
-        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="取消" />
-      </Dialog>
-      
-      <!-- 对话框导航 -->
-      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="FileAssociationDlg">LicenseAccepted = "1"</Publish>
-      <Publish Dialog="FileAssociationDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
-      <Publish Dialog="FileAssociationDlg" Control="Next" Event="NewDialog" Value="CustomizeDlg">1</Publish>
-      <Publish Dialog="CustomizeDlg" Control="Back" Event="NewDialog" Value="FileAssociationDlg">1</Publish>
+      <UIRef Id="WixUI_InstallDir" />
     </UI>
     
     <!-- 属性定义 -->
-    <Property Id="SET_AS_DEFAULT" Value="1" />
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     
     <!-- 许可协议 -->
@@ -528,7 +504,7 @@ def main():
         if not args.full:
             print("输出文件:")
             print("  - 可执行文件: build/exe_optimized/")
-            print("  - MSI安装包: dist/ (文件名包含-Optimized后缀)")
+            print("  - MSI安装包: dist/")
             print("\n💡 优化效果:")
             print("  - 包大小预计从200MB减少到40-80MB")
             print("  - 安装和启动速度显著提升")
